@@ -711,7 +711,7 @@ export class Airplane {
     loadModel() {
         const loader = new GLTFLoader();
         loader.load(
-            '../assets/SIERRA_ARC_GND_0824.glb',
+            './assets/SIERRA_ARC_GND_0824.glb',
             (gltf) => {
                 const model = gltf.scene;
                 
