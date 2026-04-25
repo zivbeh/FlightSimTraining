@@ -16,10 +16,56 @@
     </script>
     
     <script type="module" src="/src/main.js" defer></script>
-    <script type="module" src="/src/Airplane.js" defer></script>
 </head>
 <body>
-    <canvas id="bg" class="canvas"></canvas>
+    
+    
+
+    <div class="container">
+        <div id="viewport">
+            <canvas id="bg" class="canvas"></canvas>
+            <button id="restartBtn">Restart</button>
+            <div id="speedometer">
+                <div class="speed-label">SPEED</div>
+                <div class="speed-needle"></div>
+                <div class="speed-value">0.00</div>
+                <div class="speed-unit">m/s</div>
+            </div>
+            
+            <div id="altimeter">
+                <div class="alt-label">ALT</div>
+                <div class="alt-bar-container">
+                    <div class="alt-bar-fill"></div>
+                </div>
+                <div class="alt-value">0</div>
+                <div class="alt-unit">m</div>
+            </div>
+        </div>
+
+        <div id="splitter" aria-label="Resize panel" role="separator"></div>
+        <div id="right-panel">
+            
+            <div id="editor-section">
+                <div class="toolbar">
+                    <button id="runBtn">Run Code</button>
+                    <span class="file-name">main.js</span>
+                </div>
+                
+                <div class="editor-wrapper">
+                    <div id="line-numbers">1</div>
+                    <div class="input-container">
+                        <pre id="highlight-layer" aria-hidden="true"></pre>
+                        <textarea id="codeEditor" spellcheck="false"></textarea>
+                    </div>
+            </div>
+
+            <div id="console-section">
+                <div class="console-header">Console</div>
+                <div id="console">-- System Ready --</div>
+            </div>
+
+        </div>
+    </div>
 
 </body>
 </html>

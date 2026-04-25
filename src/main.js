@@ -1,140 +1,183 @@
-import * as THREE from 'three';
-import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
-import { Sky } from 'https://unpkg.com/three@0.160.0/examples/jsm/objects/Sky.js';
+import { World } from './World.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
-
 import { Airplane } from './Airplane.js';
+import { CodeEditor } from './CodeEditor.js';
+import * as Obstacle from './obstacle.js';
 
-// --- 1. Scene & Camera Setup ---
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
-camera.position.set(0, 10, 20);
+// --- Initialize Core ---
+const world = new World('#bg');
+const airplane = new Airplane(world.scene);
+const controls = new OrbitControls(world.camera, world.renderer.domElement);
 
-const renderer = new THREE.WebGLRenderer({ 
-    canvas: document.querySelector('#bg'), 
-    antialias: true 
-});
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping; // Required for the Sky shader look
 
-// --- 2. The Unity-Style Sky ---
-const sky = new Sky();
-sky.scale.setScalar(450000);
-scene.add(sky);
-
-const sun = new THREE.Vector3();
-const effectController = {
-    turbidity: 10,
-    rayleigh: 3,
-    mieCoefficient: 0.005,
-    mieDirectionalG: 0.7,
-    elevation: 2, // Horizon angle
-    azimuth: 180,
+const editorInfo = {
+    airplane: {
+        pos: {
+            x: 0,
+            y: 0,
+            z: 0
+        },
+        velocity: {
+            x: 0,
+            y: 0,
+            z: 0
+        },
+        air_speed: {
+            x: 0,
+            y: 0,
+            z: 0
+        },
+        controls: airplane.controls
+    },
+    keys: new Set(),
 };
 
-const uniforms = sky.material.uniforms;
-uniforms['turbidity'].value = effectController.turbidity;
-uniforms['rayleigh'].value = effectController.rayleigh;
-uniforms['mieCoefficient'].value = effectController.mieCoefficient;
-uniforms['mieDirectionalG'].value = effectController.mieDirectionalG;
+const editorApi = {
+    setAileronLeft: (instance, value) => {
+        airplane.controls.aileronLeft = value;
+    },
+    setAileronRight: (instance, value) => {
+        airplane.controls.aileronRight = value;
+    },
+    setElevatorLeft: (instance, value) => {
+        airplane.controls.elevatorLeft = value;
+    },
+    setElevatorRight: (instance, value) => {
+        airplane.controls.elevatorRight = value;
+    },
+    setFlaps: (instance, value) => {
+        airplane.controls.flaps = value;
+    },
+    setSteeringWheel: (instance, value) => {
+        airplane.controls.steeringWheel = value;
+    },
+    setThrottle: (instance, value) => {
+        airplane.controls.throttle = value;
+    },
+};
 
-const phi = THREE.MathUtils.degToRad(90 - effectController.elevation);
-const theta = THREE.MathUtils.degToRad(effectController.azimuth);
-sun.setFromSphericalCoords(1, phi, theta);
-uniforms['sunPosition'].value.copy(sun);
+// const initialCode = 
+// `setThrottle(1)
+// await sleep(1000)
+// setElevatorLeft(-16)
+// setElevatorRight(-16)
+// `
 
-// --- 3. The Ground Plane (Grass) ---
-const textureLoader = new THREE.TextureLoader();
+const initialCode = 
+`// Minimalist Editor Demo
+startLoop(async () => {
+    // 1. Live Data: Reacts to current altitude
+    const alt = info.airplane.pos.y;
+    
+    // 2. Terminal: Dynamic logging
+    log('Altitude: ', alt.toFixed(2));
 
-// You can replace this URL with your own grass texture file
-const grassTexture = textureLoader.load('https://threejs.org/examples/textures/terrain/grasslight-big.jpg');
+    // 3. API Control: Auto-throttle based on height
+    if (alt < 10) {
+        setThrottle(1);
+        setElevatorLeft(-5);
+        setElevatorRight(-5);
+        log("System: Low altitude! Applying full thrust.");
+    } else {
+        setElevatorLeft(0);
+        setElevatorRight(0);
+        setThrottle(0.5);
+    }
 
-// These lines are CRITICAL: They tell Three.js to tile the image
-grassTexture.wrapS = THREE.RepeatWrapping;
-grassTexture.wrapT = THREE.RepeatWrapping;
-grassTexture.repeat.set(100, 100); // Repeat the image 100 times across the plane
 
-const planeGeo = new THREE.PlaneGeometry(1000, 1000);
-const planeMat = new THREE.MeshStandardMaterial({ 
-    map: grassTexture, // Apply the texture here
-    roughness: 0.8     // Grass shouldn't be shiny like plastic
+    // 4. Async: Wait before next check
+    await sleep(500); 
+}, 1000);
+`;
+
+setInterval(() => {
+    editorInfo.airplane.pos.x = parseFloat(airplane.position.x.toFixed(2));
+    editorInfo.airplane.pos.y = parseFloat(airplane.position.y.toFixed(2));
+    editorInfo.airplane.pos.z = parseFloat(airplane.position.z.toFixed(2));
+
+    editorInfo.airplane.velocity.x = parseFloat(airplane.velocity.x.toFixed(2));
+    editorInfo.airplane.velocity.y = parseFloat(airplane.velocity.y.toFixed(2));
+    editorInfo.airplane.velocity.z = parseFloat(airplane.velocity.z.toFixed(2));
+
+    
+    editorInfo.airplane.air_speed.x = parseFloat(airplane.relativeVelocity.x.toFixed(2));
+    editorInfo.airplane.air_speed.y = parseFloat(airplane.relativeVelocity.y.toFixed(2));
+    editorInfo.airplane.air_speed.z = parseFloat(airplane.relativeVelocity.z.toFixed(2));
+
+    editorInfo.airplane.controls = airplane.controls;
+    
+    // editorInfo.airplane.pos.x =;
+    // editorInfo.missile.pos.x = parseFloat(editorInfo.missile.pos.x.toFixed(2));
+    codeEditor.setInfo(editorInfo);
+}, 30);
+
+window.addEventListener('keydown', (e) => {
+    if (!codeEditor.isFocused && !editorInfo.keys.has(e.key)) {
+        editorInfo.keys.add(e.key);
+        codeEditor.setInfo(editorInfo);
+    }
 });
 
-const ground = new THREE.Mesh(planeGeo, planeMat);
-ground.rotation.x = -Math.PI / 2;
-scene.add(ground);
-ground.position.y = 0;
-
-// --- 4. Lights ---
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-scene.add(ambientLight);
-
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-directionalLight.position.copy(sun); // Light comes from the "sun"
-scene.add(directionalLight);
-
-// --- 5. Controls ---
-const controls = new OrbitControls(camera, renderer.domElement);
-
-
-// 5.5 Add a Realistic Airplane Model
-var airplane = new Airplane(scene);
-
-// --- 6. Input Controller ---
-class InputController {
-    constructor() {
-        this.keys = new Map();
-        this.rotationSpeed = 0.05;
-        
-        this.setupEventListeners();
+window.addEventListener('keyup', (e) => {
+    if (!codeEditor.isFocused && editorInfo.keys.has(e.key)) {
+        editorInfo.keys.delete(e.key);
+        codeEditor.setInfo(editorInfo);
     }
+});
 
-    setupEventListeners() {
-        window.addEventListener('keydown', (e) => this.handleKeyDown(e), false);
-        window.addEventListener('keyup', (e) => this.handleKeyUp(e), false);
-    }
 
-    handleKeyDown(event) {
-        const key = event.key.toLowerCase();
-        if (!this.keys.has(key)) {
-            this.keys.set(key, true);
-        }
-    }
+// --- 2. Instantiate CodeEditor ---
+const codeEditor = new CodeEditor(editorInfo, editorApi, initialCode);
 
-    handleKeyUp(event) {
-        const key = event.key.toLowerCase();
-        this.keys.delete(key);
-    }
-
-    update(airplane) {
-        console.log("as")
-        if (this.keys.has('w')) airplane.rotateUp(this.rotationSpeed);
-        if (this.keys.has('s')) airplane.rotateDown(this.rotationSpeed);
-        if (this.keys.has('a')) airplane.rotateLeft(this.rotationSpeed);
-        if (this.keys.has('d')) airplane.rotateRight(this.rotationSpeed);
-
-        if (this.keys.has(' ')) {
-            const forward = this.airplane.getForwardVector();
-            // Update velocity for momentum
-            this.airplane.velocity.x += forward.x * this.airplane.accelerationForce;
-            this.airplane.velocity.y += forward.y * this.airplane.accelerationForce;
-            this.airplane.velocity.z += forward.z * this.airplane.accelerationForce;
-            
-            // Also update position directly in the aiming direction
-            this.airplane.position.x += forward.x * this.airplane.accelerationForce;
-            this.airplane.position.y += forward.y * this.airplane.accelerationForce;
-            this.airplane.position.z += forward.z * this.airplane.accelerationForce;
-        }
-    }
-
-    isKeyPressed(key) {
-        return this.keys.has(key.toLowerCase());
-    }
+const restartBtn = document.getElementById('restartBtn');
+if (restartBtn) {
+    restartBtn.addEventListener('click', () => {
+        window.location.reload();
+    });
 }
 
-const inputController = new InputController();
+const splitter = document.getElementById('splitter');
+const rightPanel = document.getElementById('right-panel');
+let isResizing = false;
+const MIN_RIGHT_PANEL_WIDTH = 280;
+const MIN_VIEWPORT_WIDTH = 320;
 
-// --- 7. Third Person Camera Controller ---
+if (splitter && rightPanel) {
+    splitter.addEventListener('mousedown', (event) => {
+        isResizing = true;
+        document.body.style.cursor = 'col-resize';
+        event.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (event) => {
+        if (!isResizing) return;
+
+        const available = window.innerWidth - MIN_VIEWPORT_WIDTH;
+        const newWidth = Math.min(Math.max(MIN_RIGHT_PANEL_WIDTH, window.innerWidth - event.clientX), available);
+        rightPanel.style.width = `${newWidth}px`;
+
+        const viewport = document.getElementById('viewport');
+        if (viewport) {
+            world.resize(viewport.clientWidth, viewport.clientHeight);
+        } else {
+            world.resize();
+        }
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (!isResizing) return;
+        isResizing = false;
+        document.body.style.cursor = '';
+
+        const viewport = document.getElementById('viewport');
+        if (viewport) {
+            world.resize(viewport.clientWidth, viewport.clientHeight);
+        } else {
+            world.resize();
+        }
+    });
+}
+
 class ThirdPersonCamera {
     constructor(camera, airplane) {
         this.camera = camera;
@@ -145,8 +188,10 @@ class ThirdPersonCamera {
     }
 
     update() {
+        if (!this.airplane.model) return;
+        if (inputController.mouse.left) return
         // Get the forward vector of the airplane
-        const forward = this.airplane.getForwardVector();
+        const forward = this.airplane.directions.z;
         
         // Calculate desired camera position (behind and above the airplane)
         const desiredX = this.airplane.position.x - forward.x * this.distance;
@@ -168,32 +213,119 @@ class ThirdPersonCamera {
     }
 }
 
-const thirdPersonCamera = new ThirdPersonCamera(camera, airplane);
+class InputController {
+    constructor() {
+        this.keys = new Map();
+        this.mouse = {
+            x: 0,
+            y: 0,
+            left: false,
+            right: false,
+            middle: false,
+            wheelDelta: 0
+        };
+        this.setupEventListeners();
+    }
 
-// --- 8. Handle Window Resize ---
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-}, false);
+    setupEventListeners() {
+        // Keyboard
+        window.addEventListener('keydown', (e) => this.handleKeyDown(e), false);
+        window.addEventListener('keyup', (e) => this.handleKeyUp(e), false);
 
-airplane.setPosition(0, 4, 0)
+        // Mouse Position
+        window.addEventListener('mousemove', (e) => this.handleMouseMove(e), false);
 
-// --- 9. Animation Loop ---
+        // Mouse Buttons
+        window.addEventListener('mousedown', (e) => this.handleMouseButtons(e, true), false);
+        window.addEventListener('mouseup', (e) => this.handleMouseButtons(e, false), false);
+
+        // Mouse Wheel
+        window.addEventListener('wheel', (e) => {
+            this.mouse.wheelDelta = e.deltaY;
+        }, { passive: true });
+
+        // Optional: Context Menu (prevents right-click menu from popping up in-game)
+        window.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+
+    handleMouseMove(event) {
+        this.mouse.x = event.clientX
+        this.mouse.y = event.clientY
+    }
+
+    handleMouseButtons(event, isDown) {
+        if (event.button === 0) this.mouse.left = isDown;
+        if (event.button === 1) this.mouse.middle = isDown;
+        if (event.button === 2) this.mouse.right = isDown;
+    }
+
+    handleKeyDown(event) {
+        const key = event.key.toLowerCase();
+        if (!this.keys.has(key)) {
+            this.keys.set(key, true);
+        }
+    }
+
+    handleKeyUp(event) {
+        const key = event.key.toLowerCase();
+        this.keys.delete(key);
+    }
+
+    isKeyPressed(key) {
+        return this.keys.has(key.toLowerCase());
+    }
+
+}
+
+const inputController = new InputController();
+const thirdPersonCamera = new ThirdPersonCamera(world.camera, airplane);
+
+airplane.setPosition(0, 0, 0);
+Obstacle.initObstacles(world.scene);
+
 function animate() {
     requestAnimationFrame(animate);
-    
-    // Update airplane input
-    inputController.update(airplane);
-     
-    // Update airplane physics
+
+    // Update Logic
+    // airplane.updateKeys(inputController.keys);
     airplane.updateTime();
+    Obstacle.updateObstacles();
+
+    // Environment Animation
+    world.effectController.elevation += 0.02;
+    world.updateSun();
+
+    // Dynamic Shadows linked to airplane
+    const altitude = Math.max(airplane.position.y, 0);
+    const dynamicSize = 3 + (altitude * 2);
     
-    // Update third person camera
-    // thirdPersonCamera.update();
+    world.directionalLight.shadow.camera.left = -dynamicSize;
+    world.directionalLight.shadow.camera.right = dynamicSize;
+    world.directionalLight.shadow.camera.top = dynamicSize;
+    world.directionalLight.shadow.camera.bottom = -dynamicSize;
+    world.directionalLight.shadow.camera.updateProjectionMatrix();
+
+    // Light follows airplane
+    world.directionalLight.position.copy(airplane.position).addScaledVector(world.sun, 50);
+    world.directionalLight.target.position.copy(airplane.position);
+
+    thirdPersonCamera.update();
+    updateSpeedometer(airplane);
     
-    // Render scene
-    renderer.render(scene, camera);
+    // Render
+    world.render();
+}
+
+function updateSpeedometer(plane) {
+    const speed = plane.relativeVelocity.z;
+    const altitude = Math.max(plane.position.y, 0);
+    
+    document.querySelector('.speed-value').textContent = speed.toFixed(2);
+    const speedRatio = Math.min(speed / 0.6, 1);
+    document.querySelector('.speed-needle').style.transform = `rotate(${-90 + (speedRatio * 90)}deg)`;
+    
+    document.querySelector('.alt-bar-fill').style.height = (Math.min(altitude / 100, 1) * 100) + '%';
+    document.querySelector('.alt-value').textContent = Math.round(altitude);
 }
 
 animate();

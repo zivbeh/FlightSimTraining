@@ -1,16 +1,500 @@
-body {
+html, body {
     margin: 0;
+    height: 100%;
     overflow: hidden; /* Prevents scrollbars */
 }
 
 #bg {
-    position: fixed;
+    position: absolute;
     top: 0;
     left: 0;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
+    display: block;
 }
 
-.canvas {
-    
+
+/* Speedometer */
+#speedometer {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    width: 140px;
+    height: 140px;
+    background-image: url('./assets/speedometer.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    border: 2px solid rgba(255, 0, 0, 0.3);
+}
+
+.speed-needle {
+    position: absolute;
+    width: 2px;
+    height: 40px;
+    background: linear-gradient(to top, #ff4444, #ff0000);
+    transform-origin: center bottom;
+    top: 70%;
+    left: 50%;
+    margin-left: -1px;
+    margin-top: -50px;
+    border-radius: 2px;
+    box-shadow: 0 0 5px rgba(255, 0, 0, 0.6);
+    transition: transform 0.05s ease-out;
+}
+
+.speed-label {
+    font-size: 0;
+    display: none;
+}
+
+.speed-value {
+    position: absolute;
+    bottom: -30px;
+    left: 45px;
+    font-size: 14px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    color: #ff0000;
+    letter-spacing: 1px;
+    text-shadow: 0 0 5px rgba(255, 0, 0, 0.5);
+    z-index: 10;
+}
+
+.speed-unit {
+    font-size: 0;
+    display: none;
+}
+
+/* Altimeter */
+#altimeter {
+    position: absolute;
+    bottom: 20px;
+    left: 175px;
+    width: 60px;
+    height: 140px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid #00ff00;
+    border-radius: 4px;
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    z-index: 100;
+    font-family: 'Courier New', monospace;
+    color: #00ff00;
+}
+
+.alt-label {
+    font-size: 10px;
+    font-weight: bold;
+    margin-bottom: 3px;
+    letter-spacing: 1px;
+}
+
+.alt-bar-container {
+    width: 8px;
+    height: 70px;
+    background: rgba(0, 50, 0, 0.5);
+    border: 1px solid #00ff00;
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 5px;
+    position: relative;
+}
+
+.alt-bar-fill {
+    width: 100%;
+    height: 0%;
+    background: linear-gradient(to top, #00ff00, #00aa00);
+    border-radius: 1px;
+    transition: height 0.1s ease-out;
+    box-shadow: 0 0 8px rgba(0, 255, 0, 0.4);
+}
+
+.alt-value {
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+.alt-unit {
+    font-size: 9px;
+    margin-top: 2px;
+    opacity: 0.7;
+}
+
+
+
+
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #1e1e1e;
+    color: #eee;
+    overflow: hidden;
+}
+
+/* GLOBAL SCROLLBAR STYLES */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.container {
+    display: flex;
+    height: 100vh;
+    min-height: 0;
+}
+
+/* LEFT SIDE: Viewport */
+#viewport {
+    position: relative;
+    flex: 1; /* Takes remaining space */
+    background: #111;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.placeholder-content {
+    flex: 1;
+    border: 2px dashed #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #555;
+}
+
+/* Resize handle */
+#splitter {
+    width: 10px;
+    cursor: col-resize;
+    background: rgba(255,255,255,0.08);
+    transition: background 0.2s ease;
+}
+
+#splitter:hover {
+    background: rgba(255,255,255,0.18);
+}
+
+/* RIGHT SIDE: Vertical Stack */
+#right-panel {
+    width: 500px;
+    min-width: 280px;
+    max-width: 70vw;
+    display: flex;
+    flex-direction: column;
+    border-left: 2px solid #333;
+}
+
+/* INFO DISPLAY */
+#info-display {
+    background: #252526;
+    padding: 10px 15px;
+    border-bottom: 2px solid #333;
+    font-family: 'Consolas', monospace;
+    font-size: 13px;
+    display: flex;
+    flex-direction: row; /* Use horizontal space at top level */
+    flex-wrap: wrap;
+    gap: 15px 30px;
+    flex-shrink: 0;
+    max-height: 160px;
+    overflow-y: auto;
+}
+.info-item { display: flex; gap: 8px; align-items: baseline; min-width: 90px; }
+.info-group { 
+    padding-left: 10px; 
+    border-left: 1px solid #3e3e42; 
+    margin: 2px 0 4px 4px; 
+    display: flex; 
+    flex-direction: row; /* Nested items flow horizontally */
+    flex-wrap: wrap; 
+    gap: 8px 16px; 
+}
+.info-node { 
+    display: flex; 
+    flex-direction: column; /* Keep labels above their groups */
+    gap: 2px;
+}
+#info-display.vertical, .info-group.vertical {
+    flex-direction: column;
+    gap: 4px;
+}
+
+.info-key { color: #888; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; flex-shrink: 0; }
+.info-val {
+    color: #4af626;
+    font-weight: bold;
+    display: inline-block;
+    min-width: 4ch;
+    max-width: 7ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.info-val.string { color: #ce9178; } /* Orange strings */
+
+/* IDE SECTION */
+#editor-section {
+    flex: 1; /* This tells the editor to take up ALL REMAINING space */
+    display: flex;
+    flex-direction: column;
+    min-height: 0; /* Prevents the editor from pushing the console off screen */
+}
+
+/* CONSOLE SECTION */
+#console-section {
+    height: 200px; /* SET YOUR FIXED HEIGHT HERE */
+    flex-shrink: 0; /* CRITICAL: Prevents the console from collapsing */
+    background: #000;
+    border-top: 2px solid #333;
+    display: flex;
+    flex-direction: column;
+}
+
+.toolbar {
+    padding: 10px;
+    background: #2d2d2d;
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+}
+
+#execution-timer {
+    color: #888;
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+    margin-left: auto; /* Pushes the timer and run button to the right */
+    margin-right: 15px;
+}
+
+#runBtn {
+    min-width: 40px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #007acc;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 12px;
+    line-height: 1;
+}
+
+#restartBtn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 200;
+    min-width: 80px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 122, 204, 0.95);
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 14px;
+    line-height: 1;
+}
+
+#runBtn:not(.stop) {
+    padding-left: 12px;
+}
+
+#restartBtn:not(.stop) {
+    padding-left: 14px;
+}
+
+#runBtn.stop,
+#restartBtn.stop { background: #cc2b00; }
+
+#viewport {
+    position: relative;
+}
+
+#codeEditor {
+    flex: 1;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 15px;
+    font-family: 'Consolas', monospace;
+    font-size: 14px;
+    border: none;
+    outline: none;
+    resize: none;
+}
+
+/* CONSOLE SECTION */
+
+.console-header {
+    font-size: 11px;
+    padding: 5px 15px;
+    background: #252526;
+    color: #888;
+    text-transform: uppercase;
+}
+
+#console {
+    flex: 1;
+    padding: 10px 15px;
+    overflow-y: auto;
+    font-family: 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.log-entry { margin-bottom: 2px; white-space: pre-wrap; word-break: break-all; }
+.log-user { color: #4af626; }
+.log-system { color: #888; font-style: italic; }
+.log-error { color: #f44747; font-weight: bold; }
+
+.status-tag { font-size: 10px; background: #333; padding: 4px 8px; border-radius: 10px; color: #888; }
+
+/* IDE SECTION Wrapper */
+.editor-wrapper {
+    flex: 1;
+    display: flex;
+    background: #1e1e1e;
+    overflow: hidden;
+    position: relative;
+}
+
+/* THE GUTTER (Line Numbers) */
+#line-numbers {
+    width: 40px;
+    padding: 15px 5px;
+    text-align: right;
+    background: #252526;
+    color: #858585;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+    line-height: 1.5; /* MUST match textarea */
+    user-select: none;
+    border-right: 1px solid #333;
+    overflow: hidden;
+}
+
+/* THE TEXTAREA */
+#codeEditor {
+    flex: 1;
+    background: transparent;
+    color: #9cdcfe; /* VS Code-style Blue */
+    padding: 15px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+    line-height: 1.5; /* MUST match gutter */
+    border: none;
+    outline: none;
+    resize: none;
+    white-space: pre;
+    overflow-x: auto;
+    tab-size: 4;
+    -moz-tab-size: 4;
+}
+
+/* Selection highlight color */
+#codeEditor::selection {
+    background: #264f78;
+}
+
+.input-container {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+}
+
+#codeEditor, #highlight-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 15px;
+    border: none;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    tab-size: 4;
+    white-space: pre;
+    word-wrap: break-word;
+    box-sizing: border-box;
+}
+
+/* The textarea is on top and transparent */
+#codeEditor {
+    z-index: 2;
+    background: transparent;
+    color: transparent; /* Hide the plain text */
+    caret-color: white; /* Keep the blinking cursor visible */
+    resize: none;
+    outline: none;
+}
+
+/* The highlight layer is behind */
+#highlight-layer {
+    z-index: 1;
+    color: #9cdcfe; /* Default Blue */
+    background: #1e1e1e;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+/* VS Code Style Colors */
+.hl-keyword { color: #c586c0; } /* Purple: if, else, class, const */
+.hl-func    { color: #dcdcaa; } /* Yellow: log(), startLoop() */
+.hl-var     { color: #9cdcfe; } /* Light Blue: variables */
+.hl-str     { color: #ce9178; } /* Orange: "strings" */
+.hl-comment { color: #6a9955; } /* Green: // comments */
+.hl-num     { color: #b5cea8; } /* Light Green: 123 */
+
+
+/* This targets the invisible textarea where the user actually clicks */
+#codeEditor::selection {
+    background: rgba(38, 79, 120, 0.4); /* VS Code Blue with 40% transparency */
+    color: transparent; /* Keep the text itself transparent so the layer below shows */
+}
+
+/* For Firefox support */
+#codeEditor::-moz-selection {
+    background: rgba(38, 79, 120, 0.4);
+    color: transparent;
+}
+
+#codeEditor {
+    /* ... your other styles ... */
+    caret-color: #aeafad; /* A bright silver/white cursor */
 }
