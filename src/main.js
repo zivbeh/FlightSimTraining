@@ -9,8 +9,10 @@ import { UPGRADE_DEFINITIONS } from './upgradesData.js';
 import { Waypoint } from './Waypoint.js';
 import { Rocket } from './Rocket.js';
 
+// This creates a robust absolute URL pointing to your text asset
+const fileUrl = new URL('../scripts/demoCode1.txt', import.meta.url).href;
 
-const initialCode = await loadTextFile('./scripts/demoCode1.txt')
+const initialCode = await loadTextFile(fileUrl);
 
 async function loadTextFile(path) {
     try {
