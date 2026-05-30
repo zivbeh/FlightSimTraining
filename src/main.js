@@ -10,7 +10,7 @@ import { Waypoint } from './Waypoint.js';
 import { Rocket } from './Rocket.js';
 
 
-const initialCode = await loadTextFile('../scripts/demoCode1.txt')
+const initialCode = await loadTextFile('./scripts/demoCode1.txt')
 
 async function loadTextFile(path) {
     try {
