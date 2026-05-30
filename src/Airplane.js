@@ -1,6 +1,7 @@
 import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 import * as THREE from 'three';
 import Bullet from './bullet.js';
+import { soundManager } from './sound.js';
 import { obstacles } from './obstacle.js';
 
 export class Airplane {
@@ -44,6 +45,12 @@ export class Airplane {
         this.bulletLife = 180; // frames until bullet expires
         this.fireAuto = false; // set true to auto-fire at `fireInterval`
         this.wingOffsets = [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(1, 0, 0)];
+        // Ammo and HUD
+        this.ammoCapacity = 200;
+        this.ammo = this.ammoCapacity;
+        // Fuel
+        this.fuelCapacity = 100;
+        this.fuel = this.fuelCapacity;
 
         
 
@@ -51,6 +58,24 @@ export class Airplane {
         const startPoint = new THREE.Vector3(0, 0, 0);
         const endPoint = new THREE.Vector3(0, 0, 0);
         this.arrowCombined = this.createArrow(startPoint, endPoint, 0xffff00);
+        this.restart()
+    }
+
+    restart() {
+        this.setPosition(0, 0, 0);
+        this.setVelocity(0, 0, 0);
+        this.setRotation(0, 0, 0);
+        this.isCrashed = false;
+        this.particles = [];
+        this.trailCounter = 0;
+        this.propSpeed = 0;
+        this.controls = { aileronLeft: 0, aileronRight: 0, elevatorLeft: 0, elevatorRight: 0, flaps: 0, steeringWheel: 0, throttle: 0 };
+        this._noFuelWarned = false;
+        this.trailCounter = 0;
+        this.heightHistory = [];
+        this.ammo = this.ammoCapacity;
+        this.fuel = this.fuelCapacity;
+        
     }
 
     createArrow(start, end, color = 0xff0000) {
@@ -72,8 +97,29 @@ export class Airplane {
     }
 
     shoot() {
-        const leftWing  = new Bullet(this.scene, { pos: new THREE.Vector3(this.position.x, this.position.y, this.position.z), dir: this.velocity.clone().normalize() });
-        this.bullets.push(leftWing);
+        // Check ammo
+        if (typeof this.ammo === 'number' && this.ammo <= 0) {
+            try { soundManager.playEmpty(); } catch(e) {}
+            return;
+        }
+        // Determine forward direction (fallback if not available)
+        let forward = new THREE.Vector3(0, 0, 1);
+        if (this.directions && this.directions.z && this.directions.z.length()) {
+            forward = this.directions.z.clone().normalize();
+        }
+        const spawnPos = new THREE.Vector3(this.position.x, this.position.y + 0.2, this.position.z).addScaledVector(forward, 4);
+        const b = new Bullet(this.scene, { pos: spawnPos, dir: forward, speed: this.bulletSpeed, damage: this.bulletDamage, life: this.bulletLife });
+        this.bullets.push(b);
+        if (typeof this.ammo === 'number') this.ammo = Math.max(0, this.ammo - 1);
+        // small muzzle flash (a quickly-fading point light)
+        try {
+            const flash = new THREE.PointLight(0xffddaa, 1.2, 6, 2);
+            flash.position.copy(spawnPos);
+            this.scene.add(flash);
+            setTimeout(() => { try { this.scene.remove(flash); } catch(e){} }, 80);
+        } catch (e) {}
+        // play sound
+        try { soundManager.playShoot(); } catch (e) {}
     }
 
 
@@ -242,7 +288,6 @@ export class Airplane {
             this.velocity.y += liftForce;
         }
         
-
         this.applyDrag()
         this.applyThrust()
     }
@@ -321,14 +366,23 @@ export class Airplane {
         const inX = Math.abs(this.position.x - checkpointPos.x) <= effectiveInnerHalfW;
         const inY = Math.abs(this.position.y - checkpointPos.y) <= effectiveInnerHalfH;
         const inZ = Math.abs(this.position.z - checkpointPos.z) <= effectiveHalfT;
-        const passed = inX && inY && inZ;
+                const passed = inX && inY && inZ;
 
-        // Optional: Log for debugging
-        if (passed) {
-            console.log(`Passed checkpoint '${checkpointID}' at position:`, checkpointPos);
-        }
+                // Award money once per pass (edge-trigger)
+                if (!this._wasInCheckpoint && passed) {
+                    this._wasInCheckpoint = true;
+                    const checkpointReward = 200; // flat reward for passing checkpoint
+                    try {
+                        if (typeof window !== 'undefined' && window.gameState) {
+                            if (typeof window.gameState.addMoney === 'function') window.gameState.addMoney(checkpointReward);
+                            else if (typeof window.gameState.money === 'number') window.gameState.money += checkpointReward;
+                        }
+                    } catch(e){}
+                    console.log(`Passed checkpoint '${checkpointID}' — awarded ${checkpointReward}`);
+                }
+                if (!passed) this._wasInCheckpoint = false;
 
-        return passed;
+                return passed;
     }
 
     handleCrash() {
@@ -419,33 +473,44 @@ export class Airplane {
 
     applyThrust() {
         if (!this.model) return;
-        const throttle = this.controls.throttle
+                const throttle = this.controls.throttle
+
+                // If out of fuel, throttle produces no thrust
+                let throttleEff = throttle;
+                if (typeof this.fuel === 'number' && this.fuel <= 0) {
+                    throttleEff = 0;
+                    if (!this._noFuelWarned) {
+                        try { soundManager.playEmpty(); } catch(e) {}
+                        this._noFuelWarned = true;
+                    }
+                } else {
+                    this._noFuelWarned = false;
+                }
+
+                const throttleToPropSpeed = 2.5
+                if (this.propSpeed < throttleEff * throttleToPropSpeed) {
+                        this.propSpeed = throttleEff * throttleToPropSpeed
+                }
+
+                // 1. Get Forward Direction
+                const forward = this.directions.z;
+
+                // 2. Propeller Efficiency (Linear drop-off model)
+                const airSpeed = Math.max(0, this.velocity.dot(forward))*3;
         
-        const throttleToPropSpeed = 2.5
-        if (this.propSpeed < throttle * throttleToPropSpeed) {
-            this.propSpeed = throttle * throttleToPropSpeed
-        }
-        
+                const pitchSpeed = 2; // The speed at which the propeller can no longer push air
+                const thrustEfficiency = Math.max(0, 1.0 - (airSpeed / pitchSpeed));
 
-        // 1. Get Forward Direction
-        const forward = this.directions.z;
-
-        // 2. Propeller Efficiency (Linear drop-off model)
-        const airSpeed = Math.max(0, this.velocity.dot(forward))*3;
-        
-        const pitchSpeed = 2; // The speed at which the propeller can no longer push air
-        const thrustEfficiency = Math.max(0, 1.0 - (airSpeed / pitchSpeed));
-
-        // 3. Air Density Effect (Exponential decay with altitude)
-        const altitude = Math.max(0, this.position.y);
-        const densityFactor = 1
-        // const densityFactor = Math.exp(-altitude / 1200); // Scaling factor for density drop-off
+                // 3. Air Density Effect (Exponential decay with altitude)
+                const altitude = Math.max(0, this.position.y);
+                const densityFactor = 1
+                // const densityFactor = Math.exp(-altitude / 1200); // Scaling factor for density drop-off
 
 
-        // 4. Calculate final magnitude
-        const thrustMagnitude = throttle * thrustEfficiency * densityFactor * 0.03;
+                // 4. Calculate final magnitude
+                const thrustMagnitude = throttleEff * thrustEfficiency * densityFactor * 0.03 * (this.speedMultiplier || 1);
 
-        this.velocity.addScaledVector(forward, thrustMagnitude);
+                this.velocity.addScaledVector(forward, thrustMagnitude);
     }
 
     applyDrag() {
@@ -565,6 +630,36 @@ export class Airplane {
         this.position.z = z;
     }
 
+    reset() {
+        this.isCrashed = false;
+        this.velocity.set(0, 0, 0);
+        this.relativeVelocity.set(0, 0, 0);
+        this.angularVelocity.set(0, 0, 0);
+        this.relativeAngularVelocity.set(0, 0, 0);
+        this.propSpeed = 0;
+        this.fireCounter = 0;
+        this.fireAuto = false;
+        this.wasAirborne = false;
+
+        // Clear particles (explosion/trail)
+        if (this.particles && this.particles.length) {
+            this.particles.forEach(p => {
+                try { this.scene.remove(p.mesh); } catch (e) {}
+            });
+            this.particles = [];
+        }
+
+        // Reset controls to neutral
+        this.controls = { aileronLeft: 0, aileronRight: 0, elevatorLeft: 0, elevatorRight: 0, flaps: 0, steeringWheel: 0, throttle: 0 };
+
+        this._noFuelWarned = false;
+
+        // Reset orientation if model loaded
+        if (this.model) {
+            this.setRotation(0, 0, 0);
+        }
+    }
+
     setVelocity(x, y, z) {
         this.velocity.x = x;
         this.velocity.y = y;
@@ -656,8 +751,15 @@ export class Airplane {
         if (keys.has(' ')) {
             this.controls.throttle = 0.8;
         }
-        if (keys.has('r')) {
-            this.shoot();
+        // Fire with a cooldown so holding the key doesn't spawn bullets every frame
+        if (keys.has('k')) {
+            const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+            if (!this._lastShotAt) this._lastShotAt = 0;
+            const cooldownMs = 150; // ~6 shots per second, tuneable
+            if (now - this._lastShotAt >= cooldownMs) {
+                this.shoot();
+                this._lastShotAt = now;
+            }
         }
         this.controls.elevatorLeft = Math.max(-angle, Math.min(angle, this.controls.elevatorLeft));
         this.controls.elevatorRight = Math.max(-angle, Math.min(angle, this.controls.elevatorRight));

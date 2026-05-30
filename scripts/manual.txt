@@ -1,0 +1,41 @@
+// Script: Airplane controlled with keyboard
+
+startLoop(async () => {
+    const keys = info.keys;
+    const sensitivity = 15;
+    
+    // Terminal: Dynamic logging
+    const alt = info.airplane.pos.y - 0.4;
+    log('Altitude: ', alt.toFixed(1));
+
+    // Throttle Control (Spacebar)
+    if (keys.has(' ')) {
+        setThrottle(1.0);
+    } else {
+        setThrottle(0);
+    }
+
+    // Pitch Control (Elevators)
+    if (keys.has('ArrowUp')) {
+        setElevatorLeft(sensitivity);
+        setElevatorRight(sensitivity);
+    } else if (keys.has('ArrowDown')) {
+        setElevatorLeft(-sensitivity);
+        setElevatorRight(-sensitivity);
+    } else {
+        setElevatorLeft(0);
+        setElevatorRight(0);
+    }
+
+    // Roll Control (Ailerons)
+    if (keys.has('ArrowLeft')) {
+        setAileronLeft(-sensitivity);
+        setAileronRight(sensitivity);
+    } else if (keys.has('ArrowRight')) {
+        setAileronLeft(sensitivity);
+        setAileronRight(-sensitivity);
+    } else {
+        setAileronLeft(0);
+        setAileronRight(0);
+    }
+}, 50);

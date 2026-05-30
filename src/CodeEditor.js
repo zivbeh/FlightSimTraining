@@ -1,3 +1,5 @@
+import { CodeRunner } from './CodeRunner.js';
+
 export class CodeEditor {
     constructor(info = {}, api = {}, defaultCode = "") {
         // 1. Elements
@@ -14,15 +16,18 @@ export class CodeEditor {
         this.api = api;
         
         this.isFocused = false;
-        this.activeWorker = null;
-        this.syncInterval = null;
         this.infoDisplay = null;
         this.timerDisplay = null;
-        this.runTime = 0;
-        this.startTime = 0;
-        this.currentWorkerURL = null;
-        this.watchdogInterval = null;
-
+        this.runner = new CodeRunner(this.api, {
+            onLog: (args) => this.log(args),
+            onStatusChange: (isRunning) => this.updateUI(isRunning),
+            onTimerUpdate: (time) => {
+                if (this.timerDisplay) {
+                    this.timerDisplay.textContent = time !== null ? time.toFixed(2) + 's' : '';
+                }
+            }
+        });
+        this.runner.setInfo(this.info);
 
         this.init();
     }
@@ -75,6 +80,7 @@ export class CodeEditor {
     setInfo(info) {
         this.info = info;
         this.updateInfoDisplay();
+        this.runner.setInfo(info);
     }
 
     applyHighlighting() {
@@ -239,216 +245,16 @@ export class CodeEditor {
     // --- Sandbox Management ---
     toggleExecution() {
         this.runBtn.blur();
-        if (this.activeWorker) {
-            this.stop();
+        if (this.runner.activeWorker) {
+            this.runner.stop();
         } else {
-            this.run();
-        }
-    }
-
-    run() {
-        const userCode = this.editor.value;
-
-        this.log("System: Initializing...");
-        this.updateUI(true);
-        this.runTime = 0;
-        this.startTime = Date.now();
-
-        const workerBlobCode = this.generateWorkerCode(userCode);
-        const blob = new Blob([workerBlobCode], { type: 'application/javascript' });
-        this.currentWorkerURL = URL.createObjectURL(blob);
-        this.activeWorker = new Worker(this.currentWorkerURL);
-
-        const firstLineNo = 80
-        this.activeWorker.onerror = (error) => {
-            if (error.message.includes("Content Security Policy")) {
-                this.log("❌ SECURITY VIOLATION: Remote execution and 'eval' are strictly prohibited.");
-            } else if (error.lineno !== undefined) {
-                this.log("❌ SYNTAX ERROR: " + error.message + " (Line: " + (error.lineno - firstLineNo + 1) + ")");
-            }
-            this.stop();
-            error.preventDefault();
-        };
-
-        // Listen for messages FROM worker
-        this.activeWorker.onmessage = (e) => this.handleWorkerMessage(e.data);
-        
-        // Start live variable syncing TO worker
-        this.syncInterval = setInterval(() => {
-            if (this.activeWorker) {
-                this.runTime = (Date.now() - this.startTime) / 1000;
-                this.timerDisplay.textContent = this.runTime.toFixed(2) + 's';
-                this.activeWorker.postMessage({
-                    cmd: 'SYNC_INFO',
-                    value: this.info,
-                    runTime: this.runTime
-                });
-            }
-        }, 10);
-
-
-        this.lastResponseTime = Date.now();
-    
-        // Watchdog: Check every 2 seconds if the worker is still "alive"
-        this.watchdogInterval = setInterval(() => {
-            if (Date.now() - this.lastResponseTime > 3000) {
-                this.log("❌ System: Script hung (Infinite Loop detected). Terminating.");
-                this.stop();
-            }
-        }, 2000);
-
-        this.activeWorker.onmessage = (e) => {
-            this.lastResponseTime = Date.now(); // Reset the watchdog on every message
-            this.handleWorkerMessage(e.data);
-        };
-    }
-
-    stop() {
-        if (this.activeWorker) {
-            this.activeWorker.terminate();
-            this.activeWorker = null;
-            clearInterval(this.syncInterval);
-            clearInterval(this.watchdogInterval);
-
-            if (this.currentWorkerURL) {
-                URL.revokeObjectURL(this.currentWorkerURL);
-                this.currentWorkerURL = null;
-            }
-            this.timerDisplay.textContent = '';
-            this.updateUI(false);
-            this.log("--- Process Stopped ---");
+            this.runner.run(this.editor.value);
         }
     }
 
     updateUI(isRunning) {
         this.runBtn.textContent = isRunning ? "\u25A0" : "\u25B6";
         this.runBtn.classList.toggle('stop', isRunning);
-    }
-
-    generateWorkerCode(userCode) {
-        let apiHelpers = "";
-        for (const funcName in this.api) {
-            apiHelpers += `const ${funcName} = (...args) => postMessage({ cmd: '${funcName}', args: args });\n`;
-        }
-
-        const libraries = [
-            'https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js'
-        ];
-        const libString = libraries.map(url => `'${url}'`).join(', ');
-
-        const workerBlobCode = `
-        (function() {
-            "use strict";
-
-            // 1. Load Libraries
-            try {
-                if (${libraries.length > 0}) {
-                    importScripts(${libString});
-                }
-            } catch (e) {
-                postMessage({ cmd: 'LOG', args: ["❌ LIB ERROR: Failed to load external libraries."] });
-            }
-
-            // 1. Define global helpers (Only once!)
-            const log = (...args) => postMessage({ cmd: 'LOG', args: args });
-            const sleep = (ms) => new Promise(res => setTimeout(res, ms));
-            const finish = () => postMessage({ cmd: 'FINISH' });
-
-                
-            // Inject the custom API functions (like setName, printName)
-            ${apiHelpers}
-            
-
-            // 2. State & Syncing
-            let time = 0;
-            // Use a replacer to handle Set serialization for the initial state
-            let info = ${JSON.stringify(this.info, (key, value) => {
-                if (value instanceof Set) return Array.from(value);
-                return value;
-            })};
-            let gameInterval = null;
-
-            const startLoop = (callback, ms) => {
-                if (gameInterval) clearInterval(gameInterval);
-                gameInterval = setInterval(callback, Math.max(10, ms));
-            };
-
-            const stopLoop = () => {
-                if (gameInterval) clearInterval(gameInterval);
-                postMessage({ cmd: 'FINISH' });
-            };
-
-            // --- THE ERROR CATCHER ---
-            // This catches regular errors (like calling a function that doesn't exist)
-            self.onerror = function(message, source, lineno, colno, error) {
-                log("❌ RUNTIME ERROR: " + message + " (Line: " + lineno + ")");
-                postMessage({ cmd: 'FINISH' }); // Stop the worker so it doesn't spam errors
-                return true; // Prevents the error from showing in the browser console
-            };
-
-            // This catches errors inside 'async' functions (Promises)
-            self.onunhandledrejection = function(event) {
-                log("❌ ASYNC ERROR: " + (event.reason?.message || event.reason));
-                postMessage({ cmd: 'FINISH' });
-                event.preventDefault(); // Prevents the "Uncaught (in promise)" browser console log
-            };
-
-            // Handle incoming messages from main thread
-            self.onmessage = function(e) {
-                if (e.data.cmd === 'SYNC_INFO') {
-                    info = e.data.value;
-                    time = e.data.runTime;
-                    postMessage({ cmd: 'HEARTBEAT' });
-                }
-            };
-
-            // 3. Execution Wrapper
-            (async function(log, finish, sleep, startLoop, stopLoop) {
-                const self = undefined;
-                const globalThis = undefined;
-                const importScripts = undefined;
-                const fetch = undefined;
-                const XMLHttpRequest = undefined;
-                const WebSocket = undefined;
-                const Function = undefined;
-                const onmessage = undefined;
-                const onerror = undefined;
-                const onunhandledrejection = undefined;
-
-                try {
-                    ${userCode}
-                } catch (err) {
-                    log("❌ STARTUP ERROR: " + err.message);
-                    postMessage({ cmd: 'FINISH' });
-                }
-
-            })(log, finish, sleep, startLoop, stopLoop);
-        })();
-        `;
-        return workerBlobCode;
-    }
-
-    handleWorkerMessage(data) {
-        const { cmd, args } = data;
-
-        if (cmd === 'HEARTBEAT') {
-            this.lastResponseTime = Date.now();
-            return; // Don't log this to the console!
-        }
-
-        if (this.api && typeof this.api[cmd] === 'function') {
-            this.api[cmd](this, ...(args || []));
-            return;
-        }
-
-        switch(cmd) {
-            case 'LOG': 
-                this.log(args); 
-                break;
-            case 'FINISH': 
-                this.stop(); 
-                break;
-        }
     }
 }
 

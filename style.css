@@ -130,6 +130,58 @@ html, body {
     opacity: 0.7;
 }
 
+/* HUD */
+#hud {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 220;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    color: #fff;
+    font-family: 'Consolas', monospace;
+    pointer-events: none;
+}
+#hud > div { background: rgba(0,0,0,0.6); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+#hud-bullets-count, #hud-targets-count { font-weight: bold; color: #ffd24d; }
+
+/* Upgrades panel */
+#upgrades-section {
+    padding: 10px 15px;
+    border-top: 1px solid #333;
+    background: #171717;
+    color: #ddd;
+}
+
+/* Hide the inline upgrades panel — upgrades should be used via the modal only */
+#upgrades-section { display: none; }
+.upgrades-header { font-size: 12px; color: #999; margin-bottom: 8px; text-transform: uppercase; }
+#upgrades-list { display: flex; flex-direction: column; gap: 8px; }
+.upgrade-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.upgrade-label { font-family: 'Consolas', monospace; color: #9cdcfe; }
+.upgrade-controls { display:flex; gap:8px; align-items:center; }
+.upgrade-controls span { min-width: 18px; text-align:center; font-weight:bold; color:#ffd24d; }
+.upgrade-btn { background:#007acc; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; }
+.upgrade-btn:disabled { background:#444; cursor:not-allowed; }
+
+/* Modal for upgrades */
+.modal { position: fixed; inset: 0; display: none; z-index: 1000; }
+.modal[aria-hidden="false"] { display: block; }
+.modal-backdrop { position:absolute; inset:0; background: rgba(0,0,0,0.6); }
+.modal-panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 760px; max-width: 95%; background: #121212; border: 1px solid #333; border-radius: 8px; overflow: hidden; display:flex; flex-direction:column; }
+.modal-header { display:flex; align-items:center; justify-content:space-between; padding: 12px 16px; border-bottom:1px solid #222; }
+.modal-header h2 { margin:0; color:#ddd; font-size:18px; }
+.modal-close { background:transparent; border:none; color:#aaa; font-size:18px; cursor:pointer; }
+.modal-body { display:flex; gap:16px; padding:16px; }
+#upgrades-list-panel { width: 340px; max-height: 360px; overflow:auto; border-right:1px solid #222; padding-right:12px; }
+#upgrades-list-panel .upgrade-item { padding:8px; border-radius:6px; margin-bottom:8px; background: rgba(255,255,255,0.02); cursor:pointer; }
+#upgrades-list-panel .upgrade-item:hover { background: rgba(255,255,255,0.03); }
+#upgrades-detail { flex:1; padding-left:12px; color:#ddd; }
+#upgrades-detail h3 { margin:0 0 8px 0; }
+#upgrades-detail p { color:#bbb; }
+#upgrades-detail #detail-meta { margin-top:10px; color:#9cdcfe; }
+
 
 
 
@@ -311,13 +363,12 @@ body {
 }
 
 #restartBtn {
-    position: absolute;
-    top: 20px;
-    right: 20px;
+    /* Remove absolute positioning so it sits inside .top-right-buttons cleanly */
+    position: static;
     z-index: 200;
     min-width: 80px;
     height: 36px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     background: rgba(0, 122, 204, 0.95);
@@ -328,6 +379,7 @@ body {
     font-size: 14px;
     padding: 0 14px;
     line-height: 1;
+    outline: none;
 }
 
 #runBtn:not(.stop) {
@@ -498,3 +550,31 @@ body {
     /* ... your other styles ... */
     caret-color: #aeafad; /* A bright silver/white cursor */
 }
+
+.top-right-buttons { position: absolute; top: 20px; right: 20px; display:flex; gap:8px; z-index:300; }
+.top-right-buttons button { min-width: 90px; height: 36px; background: rgba(0,122,204,0.95); color:white; border:none; border-radius:5px; cursor:pointer; font-size:14px; }
+.top-right-buttons button:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(0,0,0,0.25); }
+.top-right-buttons #open-upgrades-btn-viewport { background: linear-gradient(180deg,#0a84ff,#0066cc); border: 1px solid rgba(255,255,255,0.06); }
+
+/* HUD money and score styles */
+#hud-money, #hud-score { background: rgba(0,0,0,0.6); padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #fff; }
+#hud-money { color: #b8ffb8; font-weight:700; }
+#hud-score { color: #ffd24d; font-weight:700; }
+
+/* Fuel display at bottom center */
+#fuel-display {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 300;
+    color: #fff;
+    pointer-events: none;
+}
+#fuel-label { font-size: 12px; color: #ccc; }
+#fuel-bar { width: 420px; height: 14px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; overflow: hidden; }
+#fuel-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#00ff88,#00b36b); transform-origin: left; width: 100%; }
+#fuel-count { font-size: 12px; color: #cfeccf; }

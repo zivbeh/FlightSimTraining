@@ -24,7 +24,10 @@
     <div class="container">
         <div id="viewport">
             <canvas id="bg" class="canvas"></canvas>
-            <button id="restartBtn">Restart</button>
+            <div class="top-right-buttons">
+                <button id="restartBtn" onclick="this.blur();">Restart</button>
+                <button id="open-upgrades-btn-viewport" onclick="this.blur();">Upgrades</button>
+            </div>
             <div id="speedometer">
                 <div class="speed-label">SPEED</div>
                 <div class="speed-needle"></div>
@@ -39,6 +42,22 @@
                 </div>
                 <div class="alt-value">0</div>
                 <div class="alt-unit">m</div>
+            </div>
+            <!-- HUD: bullets (in-flight) and ammo + targets -->
+            <div id="hud">
+                <div id="hud-money">$ <span id="hud-money-count">0</span></div>
+                <div id="hud-score">Score: <span id="hud-score-count">0</span></div>
+                <div id="hud-bullets">In-Flight: <span id="hud-bullets-count">0</span></div>
+                <div id="hud-ammo">Ammo: <span id="hud-ammo-count">0</span></div>
+                <div id="hud-targets">Targets: <span id="hud-targets-count">0</span></div>
+            </div>
+            <!-- Fuel bar at bottom -->
+            <div id="fuel-display">
+                <div id="fuel-label">Fuel</div>
+                <div id="fuel-bar">
+                    <div id="fuel-fill"></div>
+                </div>
+                <div id="fuel-count"><span id="fuel-count-num">0</span>/<span id="fuel-capacity-num">0</span></div>
             </div>
         </div>
 
@@ -64,6 +83,48 @@
                 <div id="console">-- System Ready --</div>
             </div>
 
+            <div id="upgrades-section">
+                <div class="upgrades-header">Upgrades</div>
+                <div id="upgrades-list">
+                    <div class="upgrade-row">
+                        <div class="upgrade-label">Speed</div>
+                        <div class="upgrade-controls"><span id="up-speed-level">0</span><button data-up="speed" class="upgrade-btn">Upgrade</button></div>
+                    </div>
+                    <div class="upgrade-row">
+                        <div class="upgrade-label">Bullets</div>
+                        <div class="upgrade-controls"><span id="up-bullets-level">0</span><button data-up="bullets" class="upgrade-btn">Upgrade</button></div>
+                    </div>
+                    <div class="upgrade-row">
+                        <div class="upgrade-label">Range</div>
+                        <div class="upgrade-controls"><span id="up-range-level">0</span><button data-up="range" class="upgrade-btn">Upgrade</button></div>
+                    </div>
+                    <div class="upgrade-row">
+                        <div class="upgrade-label">Fuel</div>
+                        <div class="upgrade-controls"><span id="up-fuel-level">0</span><button data-up="fuel" class="upgrade-btn">Upgrade</button></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Upgrades Modal -->
+    <div id="upgrades-modal" class="modal" aria-hidden="true">
+        <div class="modal-backdrop" id="upgrades-backdrop"></div>
+        <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="upgrades-title">
+            <div class="modal-header">
+                <h2 id="upgrades-title">Upgrades</h2>
+                <button id="upgrades-close" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="upgrades-list-panel"></div>
+                <div id="upgrades-detail">
+                    <h3 id="detail-name"></h3>
+                    <p id="detail-desc"></p>
+                    <div id="detail-meta"></div>
+                    <div style="margin-top:10px;"><button id="detail-upgrade-btn" class="upgrade-btn">Upgrade</button></div>
+                </div>
+            </div>
         </div>
     </div>
 

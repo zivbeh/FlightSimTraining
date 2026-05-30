@@ -3,12 +3,86 @@ import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/cont
 import { Airplane } from './Airplane.js';
 import { CodeEditor } from './CodeEditor.js';
 import * as Obstacle from './obstacle.js';
+import { soundManager } from './sound.js';
+import Upgrades from './upgrades.js';
+import { UPGRADE_DEFINITIONS } from './upgradesData.js';
+import { Waypoint } from './Waypoint.js';
+import { Rocket } from './Rocket.js';
+
+
+const initialCode = await loadTextFile('../scripts/demoCode1.txt')
+
+async function loadTextFile(path) {
+    try {
+        const response = await fetch(path);
+        
+        // Check if the file actually exists and was loaded successfully
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        
+        const textString = await response.text();
+        return textString;
+    } catch (error) {
+        console.error("Error loading text file:", error);
+        throw error; // Re-throw so the calling code knows it failed
+    }
+}
+
 
 // --- Initialize Core ---
 const world = new World('#bg');
 const airplane = new Airplane(world.scene);
-const controls = new OrbitControls(world.camera, world.renderer.domElement);
+// const rocket = new Rocket(world.scene);
 
+
+
+const controls = new OrbitControls(world.camera, world.renderer.domElement);
+const checkpoint1 = new Waypoint(world, {
+    radius: 4,
+    height: 100,
+    startHeight: 50,
+    color: 'rgb(255, 0, 0)',
+    opacity: 0.25
+});
+checkpoint1.setPosition(0, 30, 200);
+const checkpoint2 = new Waypoint(world, {
+    radius: 4,
+    height: 15,
+    startHeight: 0,
+    color: 'rgb(255, 0, 0)',
+    opacity: 0.25
+});
+checkpoint2.setPosition(0, 0, 40);
+
+const checkpoint3 = new Waypoint(world, {
+    radius: 4,
+    height: 15,
+    startHeight: 0,
+    color: 'rgb(255, 0, 0)',
+    opacity: 0.25
+});
+checkpoint3.setPosition(20, 0, 80);
+const checkpoint4 = new Waypoint(world, {
+    radius: 4,
+    height: 10,
+    startHeight: 40,
+    color: 'rgb(255, 0, 0)',
+    opacity: 0.25
+});
+checkpoint4.setPosition(-40, 0, 300);
+const checkpoints = [checkpoint1, checkpoint2, checkpoint3, checkpoint4];
+
+// Game state: money, score, flight time
+window.gameState = {
+    money: 500,
+    score: 0,
+    flightTime: 0,
+    addMoney(amount) { this.money = Math.max(0, Math.floor(this.money + (amount||0))); },
+    addScore(v) { this.score = Math.max(0, Math.floor(this.score + (v||0))); }
+};
+
+Obstacle.initObstacles(world.scene);
 
 const editorInfo = {
     airplane: {
@@ -63,32 +137,6 @@ const editorApi = {
 // setElevatorRight(-16)
 // `
 
-const initialCode = 
-`// Minimalist Editor Demo
-startLoop(async () => {
-    // 1. Live Data: Reacts to current altitude
-    const alt = info.airplane.pos.y;
-    
-    // 2. Terminal: Dynamic logging
-    log('Altitude: ', alt.toFixed(2));
-
-    // 3. API Control: Auto-throttle based on height
-    if (alt < 10) {
-        setThrottle(1);
-        setElevatorLeft(-5);
-        setElevatorRight(-5);
-        log("System: Low altitude! Applying full thrust.");
-    } else {
-        setElevatorLeft(0);
-        setElevatorRight(0);
-        setThrottle(0.5);
-    }
-
-
-    // 4. Async: Wait before next check
-    await sleep(500); 
-}, 1000);
-`;
 
 setInterval(() => {
     editorInfo.airplane.pos.x = parseFloat(airplane.position.x.toFixed(2));
@@ -129,10 +177,122 @@ window.addEventListener('keyup', (e) => {
 // --- 2. Instantiate CodeEditor ---
 const codeEditor = new CodeEditor(editorInfo, editorApi, initialCode);
 
+// --- Upgrades ---
+const upgrades = new Upgrades();
+function applyUpgradesToPlane() {
+    airplane.bulletSpeed = upgrades.getBulletSpeed();
+    airplane.bulletDamage = upgrades.getBulletDamage();
+    airplane.bulletLife = upgrades.getBulletLife();
+    airplane.speedMultiplier = upgrades.getSpeedMultiplier();
+    airplane.fuelCapacity = upgrades.getFuelCapacity();
+    // ensure current fuel doesn't exceed new capacity
+    if (typeof airplane.fuel === 'number') airplane.fuel = Math.min(airplane.fuel, airplane.fuelCapacity);
+}
+applyUpgradesToPlane();
+
+function refreshUpgradesUI() {
+    document.getElementById('up-speed-level').textContent = upgrades.getLevel('speed');
+    document.getElementById('up-bullets-level').textContent = upgrades.getLevel('bullets');
+    document.getElementById('up-range-level').textContent = upgrades.getLevel('range');
+    document.getElementById('up-fuel-level').textContent = upgrades.getLevel('fuel');
+}
+
+refreshUpgradesUI();
+
+// Inline upgrade buttons removed — purchases must be made via the upgrades modal to consume money.
+
+// --- Upgrades Modal Wiring ---
+const upgradesModal = document.getElementById('upgrades-modal');
+const upgradesBackdrop = document.getElementById('upgrades-backdrop');
+const upgradesListPanel = document.getElementById('upgrades-list-panel');
+const detailName = document.getElementById('detail-name');
+const detailDesc = document.getElementById('detail-desc');
+const detailMeta = document.getElementById('detail-meta');
+const detailUpgradeBtn = document.getElementById('detail-upgrade-btn');
+let selectedUpgradeKey = null;
+
+function openUpgradesModal() {
+    renderUpgradesList();
+    upgradesModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeUpgradesModal() {
+    upgradesModal.setAttribute('aria-hidden', 'true');
+}
+
+function renderUpgradesList() {
+    upgradesListPanel.innerHTML = '';
+    UPGRADE_DEFINITIONS.forEach(def => {
+        const level = upgrades.getLevel(def.key);
+        const item = document.createElement('div');
+        item.className = 'upgrade-item';
+        item.tabIndex = 0;
+        item.dataset.key = def.key;
+        item.innerHTML = `<strong>${def.name}</strong><div style="font-size:12px;color:#bbb">${def.short}</div><div style="font-size:12px;color:#ffd24d">Level: ${level}/${def.maxLevel}</div>`;
+        item.addEventListener('click', () => selectUpgrade(def.key));
+        upgradesListPanel.appendChild(item);
+    });
+    // Auto-select the first upgrade so users immediately see details
+    if (UPGRADE_DEFINITIONS.length > 0) {
+        selectUpgrade(UPGRADE_DEFINITIONS[0].key);
+    }
+}
+
+function selectUpgrade(key) {
+    const def = UPGRADE_DEFINITIONS.find(d => d.key === key);
+    if (!def) return;
+    selectedUpgradeKey = key;
+    detailName.textContent = def.name;
+    detailDesc.textContent = def.description;
+    const level = upgrades.getLevel(key);
+    detailMeta.innerHTML = `Level: ${level} / ${def.maxLevel} <br> Base Cost: ${def.baseCost}`;
+    detailUpgradeBtn.disabled = level >= def.maxLevel ? true : false;
+    detailUpgradeBtn.textContent = level >= def.maxLevel ? 'Maxed' : `Upgrade (Level ${level} → ${level+1})`;
+}
+
+detailUpgradeBtn.addEventListener('click', () => {
+    if (!selectedUpgradeKey) return;
+    const def = UPGRADE_DEFINITIONS.find(d => d.key === selectedUpgradeKey);
+    if (!def) return;
+    const level = upgrades.getLevel(selectedUpgradeKey);
+    const cost = def.baseCost * (level + 1);
+    if (window.gameState.money < cost) {
+        alert('Not enough money for this upgrade. Cost: ' + cost);
+        return;
+    }
+    // Deduct and apply
+    window.gameState.addMoney(-cost);
+    if (upgrades.upgrade(selectedUpgradeKey)) {
+        applyUpgradesToPlane();
+        refreshUpgradesUI();
+        renderUpgradesList();
+        selectUpgrade(selectedUpgradeKey);
+    }
+});
+
+// if (openUpgradesBtn) openUpgradesBtn.addEventListener('click', openUpgradesModal);
+const openUpgradesBtnViewport = document.getElementById('open-upgrades-btn-viewport');
+if (openUpgradesBtnViewport) openUpgradesBtnViewport.addEventListener('click', openUpgradesModal);
+if (upgradesBackdrop) upgradesBackdrop.addEventListener('click', closeUpgradesModal);
+const upgradesClose = document.getElementById('upgrades-close');
+if (upgradesClose) upgradesClose.addEventListener('click', closeUpgradesModal);
+
 const restartBtn = document.getElementById('restartBtn');
 if (restartBtn) {
     restartBtn.addEventListener('click', () => {
-        window.location.reload();
+        airplane.restart();
+        for (const cp of checkpoints) {
+            cp.mesh.material.color.copy(cp.originalColor);
+        }
+        // Refresh editor info so UI and input state update immediately
+        codeEditor.setInfo(editorInfo);
+                // reset flight time and score for new run
+                if (window.gameState) {
+                    window.gameState.flightTime = 0;
+                    window.gameState.score = 0;
+                }
+                // reset fuel to capacity
+                if (typeof airplane.fuelCapacity === 'number') airplane.fuel = airplane.fuelCapacity;
     });
 }
 
@@ -278,22 +438,89 @@ class InputController {
 }
 
 const inputController = new InputController();
+// const thirdPersonCamera = new ThirdPersonCamera(world.camera, rocket);
 const thirdPersonCamera = new ThirdPersonCamera(world.camera, airplane);
 
-airplane.setPosition(0, 0, 0);
-Obstacle.initObstacles(world.scene);
+// Resume audio on first user interaction (required by some browsers)
+function resumeAudioOnGesture() {
+    try {
+        if (soundManager && soundManager.ctx && soundManager.ctx.state === 'suspended') {
+            soundManager.ctx.resume();
+        }
+    } catch (e) {}
+    window.removeEventListener('mousedown', resumeAudioOnGesture);
+    window.removeEventListener('keydown', resumeAudioOnGesture);
+}
+window.addEventListener('mousedown', resumeAudioOnGesture);
+window.addEventListener('keydown', resumeAudioOnGesture);
+
 
 function animate() {
+    const now = performance.now();
     requestAnimationFrame(animate);
+    if (!animate._last) animate._last = now;
+    const dt = (now - animate._last) / 1000; // seconds
+    animate._last = now;
 
     // Update Logic
     // airplane.updateKeys(inputController.keys);
     airplane.updateTime();
+    // rocket.updateKeys(inputController.keys);
+    // rocket.updateTime();
     Obstacle.updateObstacles();
+
+    // Update Waypoint collision status
+    for (const cp of checkpoints) {
+        cp.update(airplane.position);
+    }
+
+    // update HUD: bullets and targets
+    try {
+        const bulletsActive = airplane.bullets ? airplane.bullets.filter(b => b && b.active).length : 0;
+        const hudBul = document.getElementById('hud-bullets-count');
+        if (hudBul) hudBul.textContent = String(bulletsActive);
+
+        const hudAmmo = document.getElementById('hud-ammo-count');
+        if (hudAmmo && typeof airplane.ammo === 'number') hudAmmo.textContent = String(airplane.ammo);
+
+        const targets = Object.values(Obstacle.obstacles || {}).filter(o => o && o.health != null && !o._destroyed).length;
+        const hudT = document.getElementById('hud-targets-count');
+        if (hudT) hudT.textContent = String(targets);
+                // money and score HUD
+                const hudMoney = document.getElementById('hud-money-count');
+                if (hudMoney && window.gameState) hudMoney.textContent = String(window.gameState.money);
+                // flight time based score: 1.01^time (time in seconds)
+                if (window.gameState) {
+                    const isAirborne = airplane.position.y > 1;
+                    if (isAirborne) window.gameState.flightTime += dt;
+                    window.gameState.score = Math.floor(Math.pow(1.2, window.gameState.flightTime));
+                    const hudScore = document.getElementById('hud-score-count');
+                    if (hudScore) hudScore.textContent = String(window.gameState.score);
+                }
+                // fuel HUD: update bar and numbers
+                const fuelFill = document.getElementById('fuel-fill');
+                const fuelNum = document.getElementById('fuel-count-num');
+                const fuelCapNum = document.getElementById('fuel-capacity-num');
+                if (fuelFill && typeof airplane.fuel === 'number' && typeof airplane.fuelCapacity === 'number') {
+                    const pct = Math.max(0, Math.min(1, airplane.fuel / airplane.fuelCapacity));
+                    fuelFill.style.width = (pct * 100) + '%';
+                    if (fuelNum) fuelNum.textContent = String(Math.floor(airplane.fuel));
+                    if (fuelCapNum) fuelCapNum.textContent = String(Math.floor(airplane.fuelCapacity));
+                }
+    } catch (e) {}
 
     // Environment Animation
     world.effectController.elevation += 0.02;
     world.updateSun();
+
+        // Fuel consumption: consume fuel while throttle is applied
+        try {
+            if (typeof airplane.fuel === 'number' && typeof airplane.fuelCapacity === 'number') {
+                const throttle = airplane.controls && airplane.controls.throttle ? airplane.controls.throttle : 0;
+                const consumptionPerSecond = 6.0; // units per second at full throttle
+                airplane.fuel = Math.max(0, airplane.fuel - consumptionPerSecond * throttle * dt);
+            }
+        } catch(e) {}
 
     // Dynamic Shadows linked to airplane
     const altitude = Math.max(airplane.position.y, 0);

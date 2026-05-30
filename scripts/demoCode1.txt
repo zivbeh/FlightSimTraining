@@ -1,0 +1,25 @@
+// Minimalist Editor Demo
+
+startLoop(async () => {
+    // 1. Live Data: Reacts to current altitude
+    const alt = info.airplane.pos.y;
+
+    // 2. Terminal: Dynamic logging
+    log('Altitude: ', alt.toFixed(2));
+
+    // 3. API Control: Auto-throttle based on height
+    if (alt < 10) {
+        setThrottle(1);
+        setElevatorLeft(-5);
+        setElevatorRight(-5);
+        log("System: Low altitude! Applying full thrust.");
+    } else {
+        setElevatorLeft(0);
+        setElevatorRight(0);
+        setThrottle(0.5);
+    }
+
+    // 4. Async: Wait before next check
+    await sleep(500);
+
+}, 1000);
