@@ -1,33 +1,49 @@
 import { CodeRunner } from './CodeRunner.js';
 
 export class CodeEditor {
-    constructor(info = {}, api = {}, defaultCode = "") {
-        // 1. Elements
+    constructor(actor, defaultCode = "") {
         this.consoleDiv = document.getElementById('console');
         this.editor = document.getElementById('codeEditor');
         this.gutter = document.getElementById('line-numbers');
         this.runBtn = document.getElementById('runBtn');
         this.highlightLayer = document.getElementById('highlight-layer');
 
-        if (this.editor) this.editor.value = defaultCode;
+        let savedCode = null;
+        try {
+            const raw = localStorage.getItem('code_editor_user_code');
+            if (raw) {
+                const data = JSON.parse(raw);
+                const isSameDay = new Date(data.timestamp).toDateString() === new Date().toDateString();
+                if (isSameDay) {
+                    savedCode = data.code;
+                } else {
+                    localStorage.removeItem('code_editor_user_code');
+                }
+            }
+        } catch (e) {
+            localStorage.removeItem('code_editor_user_code');
+        }
 
-        // 2. State
-        this.info = info;
-        this.api = api;
+        if (this.editor) this.editor.value = savedCode !== null ? savedCode : defaultCode;
+
+        this.actor = actor;
         
         this.isFocused = false;
         this.infoDisplay = null;
         this.timerDisplay = null;
-        this.runner = new CodeRunner(this.api, {
+        this.runner = this.actor.codeRunner
+        this.runner.callbacks = {
             onLog: (args) => this.log(args),
             onStatusChange: (isRunning) => this.updateUI(isRunning),
             onTimerUpdate: (time) => {
                 if (this.timerDisplay) {
                     this.timerDisplay.textContent = time !== null ? time.toFixed(2) + 's' : '';
                 }
+            },
+            onSetInfo: (info) => {
+                this.updateInfoDisplay();
             }
-        });
-        this.runner.setInfo(this.info);
+        }
 
         this.init();
     }
@@ -55,6 +71,10 @@ export class CodeEditor {
         this.editor.addEventListener('input', () => {
             this.updateLineNumbers();
             this.applyHighlighting();
+            try {
+                const data = { code: this.editor.value, timestamp: Date.now() };
+                localStorage.setItem('code_editor_user_code', JSON.stringify(data));
+            } catch (e) {}
         });
 
         this.editor.addEventListener('scroll', () => {
@@ -75,12 +95,6 @@ export class CodeEditor {
         this.updateLineNumbers();
         this.updateInfoDisplay();
         this.updateUI(false);
-    }
-
-    setInfo(info) {
-        this.info = info;
-        this.updateInfoDisplay();
-        this.runner.setInfo(info);
     }
 
     applyHighlighting() {
@@ -172,8 +186,8 @@ export class CodeEditor {
             }).join('');
         };
 
-        this.infoDisplay.className = isSimpleObj(this.info) ? 'vertical' : '';
-        this.infoDisplay.innerHTML = renderTree(this.info);
+        this.infoDisplay.className = isSimpleObj(this.actor.info) ? 'vertical' : '';
+        this.infoDisplay.innerHTML = renderTree(this.actor.info);
     }
 
     handleKeyDown(e) {
@@ -245,7 +259,7 @@ export class CodeEditor {
     // --- Sandbox Management ---
     toggleExecution() {
         this.runBtn.blur();
-        if (this.runner.activeWorker) {
+        if (this.runner.running) {
             this.runner.stop();
         } else {
             this.runner.run(this.editor.value);
@@ -257,139 +271,3 @@ export class CodeEditor {
         this.runBtn.classList.toggle('stop', isRunning);
     }
 }
-
-// export const info = {
-//     missile: {
-//         air_speed: {
-//             x: 0,
-//             y: 0,
-//             z: 0
-//         },
-//         pos: {
-//             x: 0,
-//             y: 0,
-//             z: 0
-//         },
-//         angle: 0,
-//         altitude: 0,
-//         fuel: 100
-//     },
-//     time: 0,
-//     keys: ['a', 's', 'd', 'w'],
-//     keys2: new Set(),
-//     missile2: {
-//         velocity: {
-//             x: 0,
-//             y: 0,
-//             z: 0
-//         },
-//         pos: {
-//             x: 0,
-//             y: 0,
-//             z: 0
-//         },
-//         orientation: {
-//             pitch: 0,
-//             yaw: 0,
-//             roll: 0,
-//         },
-//         angle: 0,
-//         altitude: 0,
-//         fuel: 100,
-//         name: "Missile 2"
-//     },
-//     radar: [
-//         {
-//             x: 0,
-//             y: 0,
-//             z: 0
-//         },
-//         {
-//             x: 0,
-//             y: 0,
-//             z: 0
-//         },
-//         {
-//             x: 0,
-//             y: 0,
-//             z: 0
-//         },
-//         {
-//             x: 0,
-//             y: 0,
-//             z: 0
-//         },
-
-//     ]
-// };
-
-// let externalState = {
-//     firstName: "Interceptor",
-//     lastName: ""
-// };
-
-// const updateExternalVisuals = () => {
-//     const display = document.getElementById('visual-state');
-//     if (display) {
-//         display.textContent = `${externalState.firstName} ${externalState.lastName}`.trim();
-//         display.style.color = "#007acc";
-//         display.style.fontSize = "24px";
-//     }
-// };
-
-// const apiFunctions = {
-//     setName: (instance, f, l) => {
-//         externalState.firstName = f;
-//         externalState.lastName = l;
-//         updateExternalVisuals();
-//         instance.log(`System: Data updated to [${f}] [${l}]`);
-//     },
-//     printName: (instance) => {
-//         instance.log("Display: " + `${externalState.firstName} ${externalState.lastName}`.trim());
-//     }
-// };
-
-// const initialCode = `let speed = 0;
-
-// startLoop(async () => {
-//     speed += 10;
-    
-//     log("Current speed is:", speed, "km/h");
-    
-//     if (speed >= 70 || info.keys2.has(" ")) {
-//         setName("Fast", "Car");
-//         printName();
-//         log("Destination reached. Stopping loop.");
-//         stopLoop();
-//     }
-    
-//     await sleep(400);
-//     log("pos.x is:", info.missile.pos.x);
-//     log("Current time is:", time);
-// }, 500);`;
-// // const initialCode = ''
-
-// // Instantiate the app once the script loads
-// const codeEditor = new CodeEditor(info, apiFunctions, initialCode);
-// updateExternalVisuals();
-
-
-// setInterval(() => {
-//     info.missile.pos.x += 1;
-//     info.missile.pos.x = parseFloat(info.missile.pos.x.toFixed(2));
-//     codeEditor.setInfo(info);
-// }, 1000);
-
-// window.addEventListener('keydown', (e) => {
-//     if (!codeEditor.isFocused && !info.keys2.has(e.key)) {
-//         info.keys2.add(e.key);
-//         codeEditor.setInfo(info);
-//     }
-// });
-
-// window.addEventListener('keyup', (e) => {
-//     if (!codeEditor.isFocused && info.keys2.has(e.key)) {
-//         info.keys2.delete(e.key);
-//         codeEditor.setInfo(info);
-//     }
-// });

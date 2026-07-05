@@ -1,0 +1,129 @@
+// Minimalist Editor Demo
+
+/**
+ * Standard Blueprint for reusable PID loops
+ */
+class PIDController {
+    constructor(kp = 1, ki = 0, kd = 0, minOutput = null, maxOutput = null) {
+        this.kp = kp;
+        this.ki = ki;
+        this.kd = kd;
+        this.minOutput = minOutput;
+        this.maxOutput = maxOutput;
+        
+        this.integral = 0;
+        this.lastError = 0;
+    }
+
+    /**
+     * Calculates the PID response
+     * Toggling 'ki' dynamically outside allows us to clear/engage integral easily
+     */
+    update(error, currentKi = this.ki) {
+        // Anti-Windup Triggered from the outside loop conditional
+        if (currentKi === 0) {
+            this.integral = 0;
+        }
+
+        const p = error * this.kp;
+
+        this.integral += error;
+        const i = this.integral * currentKi;
+
+        const derivative = error - this.lastError;
+        const d = derivative * this.kd;
+
+        this.lastError = error;
+
+        let output = p + i + d;
+
+        // Apply clamping limits directly if they were provided
+        if (this.maxOutput !== null) output = Math.min(this.maxOutput, output);
+        if (this.minOutput !== null) output = Math.max(this.minOutput, output);
+
+        return output;
+    }
+
+    reset() {
+        this.integral = 0;
+        this.lastError = 0;
+    }
+}
+
+// Global variables
+let targetAltitude = 40; 
+let targetRoll = 50;        // Start with a target roll of 50
+let rollTimerCounter = 0;   // Keeps track of elapsed time in milliseconds
+
+// Instantiate the independent loops with your working limits and parameters
+const altController   = new PIDController(3,    0.05, 0.3, -15, 30);
+const pitchController = new PIDController(1,    0.02, 2,   -3,  20);
+const rollController  = new PIDController(1.2,  0.01, 1,   -15, 15);
+
+startLoop(async () => {
+    // Live Data
+    const alt = info.airplane.position.y;
+    const currentPitch = -info.airplane.rotation.x; 
+    const currentRoll = info.airplane.rotation.z;
+
+    // API Control: Take-off phase vs. Cruise phase
+    if (alt < 10) {
+        setThrottle(1);
+        setElevators(-5); 
+        setRoll(0);       
+        
+        altController.reset();
+        pitchController.reset();
+        rollController.reset();
+        
+        // Keep timers reset during takeoff
+        rollTimerCounter = 0;
+    } else {
+        setThrottle(0.5);
+
+        // --- TIMER LOGIC FOR ROLL SWITCHING ---
+        // The loop interval is 50ms, so add 50 to the timer counter every tick
+        rollTimerCounter += 50;
+        
+        if (rollTimerCounter >= 20000) { // 10,000 ms = 10 seconds
+            targetRoll = -targetRoll;    // Invert the sign (switches 50 to -50, or -50 to 50)
+            rollTimerCounter = 0;        // Reset timer back to 0
+            rollController.reset();      // Optional: clear roll history on sudden target swaps to eliminate overshoot
+        }
+        
+        // --- 1. OUTER LOOP: ALTITUDE PID ---
+        const altError = targetAltitude - alt; 
+        const altKi = Math.abs(altError) < 5 ? altController.ki : 0.0;
+        let targetPitch = altController.update(altError, altKi);
+
+        // --- 2. INNER LOOP: PITCH / ELEVATOR PID ---
+        const pitchError = targetPitch - currentPitch;
+        const pitchKi = Math.abs(pitchError) < 5 ? pitchController.ki : 0.0;
+        let elev = -pitchController.update(pitchError, pitchKi);
+        setElevators(elev);
+        log(elev);
+
+        // --- 3. ROLL / AILERON PID ---
+        const rollError = targetRoll - currentRoll;
+        const rollKi = Math.abs(rollError) < 5 ? rollController.ki : 0.0;
+        let rollOutput = -rollController.update(rollError, rollKi);
+        setRoll(rollOutput);
+    }
+
+}, 50);
+
+
+
+function setRoll(angle) {
+    setAileronRight(angle);
+    setAileronLeft(-angle);
+}
+
+function setElevators(angle) {
+    setElevatorLeft(angle);
+    setElevatorRight(angle);
+}
+
+
+
+

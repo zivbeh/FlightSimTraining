@@ -2,6 +2,7 @@ export class CodeRunner {
     constructor(api = {}, callbacks = {}) {
         this.api = api;
         this.callbacks = {
+            onSetInfo: callbacks.onSetInfo || (() => {}),
             onLog: callbacks.onLog || (() => {}),
             onStatusChange: callbacks.onStatusChange || (() => {}),
             onTimerUpdate: callbacks.onTimerUpdate || (() => {}),
@@ -14,10 +15,12 @@ export class CodeRunner {
         this.runTime = 0;
         this.lastResponseTime = 0;
         this.info = {};
+        this.running = false;
     }
 
     setInfo(info) {
         this.info = info;
+        this.callbacks.onSetInfo(info);
     }
 
     log(...args) {
@@ -29,6 +32,7 @@ export class CodeRunner {
         this.callbacks.onStatusChange(true);
         this.runTime = 0;
         this.startTime = Date.now();
+        this.running = true;
 
         const workerBlobCode = this.generateWorkerCode(userCode);
         const blob = new Blob([workerBlobCode], { type: 'application/javascript' });
@@ -76,20 +80,20 @@ export class CodeRunner {
     }
 
     stop() {
-        if (this.activeWorker) {
-            this.activeWorker.terminate();
-            this.activeWorker = null;
-            clearInterval(this.syncInterval);
-            clearInterval(this.watchdogInterval);
+        if (!this.activeWorker) return
+        this.activeWorker.terminate();
+        this.activeWorker = null;
+        this.running = false;
+        clearInterval(this.syncInterval);
+        clearInterval(this.watchdogInterval);
 
-            if (this.currentWorkerURL) {
-                URL.revokeObjectURL(this.currentWorkerURL);
-                this.currentWorkerURL = null;
-            }
-            this.callbacks.onTimerUpdate(null);
-            this.callbacks.onStatusChange(false);
-            this.log("--- Process Stopped ---");
+        if (this.currentWorkerURL) {
+            URL.revokeObjectURL(this.currentWorkerURL);
+            this.currentWorkerURL = null;
         }
+        this.callbacks.onTimerUpdate(null);
+        this.callbacks.onStatusChange(false);
+        this.log("--- Process Stopped ---");
     }
 
     generateWorkerCode(userCode) {

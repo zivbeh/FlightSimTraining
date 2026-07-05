@@ -1,0 +1,55 @@
+setThrottle(1)
+setSteeringWheel(-3)
+await sleep(2000)
+setSteeringWheel(0)
+await sleep(500)
+
+//UP
+setElevatorLeft(-15)
+setElevatorRight(-15)
+await sleep(1000)
+setElevatorLeft(-3)
+setElevatorRight(-3)
+
+setAileronLeft(6)
+//right
+setElevatorRight(-30)
+await sleep(400)
+setElevatorRight(-3)
+setElevatorLeft(-30)
+await sleep(400)
+setElevatorLeft(-3)
+await sleep(3000)
+
+//Rotate
+setAileronLeft(60)
+await sleep(670)
+setAileronLeft(0)
+
+//DOWN
+setElevatorLeft(18)
+setElevatorRight(18)
+await sleep(1000)
+setElevatorLeft(-3)
+setElevatorRight(-3)
+await sleep(2000)
+
+//UP
+setElevatorLeft(-10)
+setElevatorRight(-10)
+await sleep(1000)
+
+//Land
+log("prepare landing")
+setThrottle(0)
+setElevators(-5)
+await sleep(1000)
+log("starting landing")
+setElevators(-20)
+
+
+
+function setElevators(angle) {
+    setElevatorLeft(angle)
+    setElevatorRight(angle)
+}

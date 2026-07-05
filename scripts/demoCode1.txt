@@ -2,7 +2,7 @@
 
 startLoop(async () => {
     // 1. Live Data: Reacts to current altitude
-    const alt = info.airplane.pos.y;
+    const alt = info.airplane.position.y;
 
     // 2. Terminal: Dynamic logging
     log('Altitude: ', alt.toFixed(2));
@@ -23,3 +23,4 @@ startLoop(async () => {
     await sleep(500);
 
 }, 1000);
+

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import Bullet from './bullet.js';
 import { soundManager } from './sound.js';
 import { obstacles } from './obstacle.js';
+import { CodeRunner } from './CodeRunner.js';
 
 export class Airplane {
     // Earth constants
@@ -10,8 +11,8 @@ export class Airplane {
     static GRAVITY_PARAM = 3.986e14; // GM in m³/s² (gravitational parameter)
     static EARTH_CENTER_Zs = -Airplane.EARTH_RADIUS; // Earth's center z-position
 
-    constructor(scene) {
-        this.scene = scene;
+    constructor(world) {
+        this.scene = world.scene;
         this.position = new THREE.Vector3(0, 0, 0); // controlled
         this.velocity = new THREE.Vector3(0, 0, 0); // controlled
         this.relativeVelocity = new THREE.Vector3(0, 0, 0); // observed
@@ -28,9 +29,12 @@ export class Airplane {
         this.trailSpawnRate = 0.3; // spawn particle every N frames
         this.trailCounter = 0;
         this.scale = 5
-        this.centerOffset = {x: 0, y: -0.4, z: 0}
+        this.groundOffset = {x: 0, y: -0.55, z: 0}
         this.propeller = null
         this.propSpeed = 0
+        this.info = {}
+        this.api = this.getApi();
+        this.codeRunner = new CodeRunner(this.api)
         this.loadModel();
         
         // History for height trend (position.y over time)
@@ -65,17 +69,15 @@ export class Airplane {
         this.setPosition(0, 0, 0);
         this.setVelocity(0, 0, 0);
         this.setRotation(0, 0, 0);
+        this.setAngularVelocity(0, 0, 0);
         this.isCrashed = false;
-        this.particles = [];
-        this.trailCounter = 0;
         this.propSpeed = 0;
         this.controls = { aileronLeft: 0, aileronRight: 0, elevatorLeft: 0, elevatorRight: 0, flaps: 0, steeringWheel: 0, throttle: 0 };
         this._noFuelWarned = false;
-        this.trailCounter = 0;
         this.heightHistory = [];
         this.ammo = this.ammoCapacity;
         this.fuel = this.fuelCapacity;
-        
+        this.codeRunner.stop()
     }
 
     createArrow(start, end, color = 0xff0000) {
@@ -134,6 +136,7 @@ export class Airplane {
         this.updateEffects()
         this.updateChecks()
         this.updateScene()
+        this.updateCodeRunner()
     }   
 
     collisionCheck() {
@@ -170,9 +173,18 @@ export class Airplane {
     }
 
     updateGravityAndGround() {
-        const floorHeight = -this.centerOffset.y
+        const floorHeight = -this.groundOffset.y;
 
-        if (this.position.y > floorHeight) {
+        // Check for runway collision
+        let runwayCollision = null;
+        if (this.checkpointSystems) {
+            runwayCollision = this.checkpointSystems.checkRunwayCollision(this.position, 3);
+        }
+
+        // Use runway landing height if colliding with runway, otherwise use ground
+        const effectiveFloorHeight = runwayCollision ? runwayCollision.landingHeight : floorHeight;
+
+        if (this.position.y > effectiveFloorHeight) {
             const gravityAccel = this.isCrashed ? this.gravity * 4 : this.gravity;
             this.velocity.y -= gravityAccel;
             this.wasAirborne = true;
@@ -191,15 +203,15 @@ export class Airplane {
 
                 if (hardImpact || badRoll || noseDive) {
                     this.handleCrash();
-                    this.position.y = floorHeight;
+                    this.position.y = effectiveFloorHeight;
                     this.wasAirborne = false;
                     return; // leave plane in crashed orientation
                 }
             }
             this.wasAirborne = false;
 
-            // Normal ground: settle, correct orientation, apply friction
-            this.position.y = floorHeight;
+            // Normal ground/runway landing: settle, correct orientation, apply friction
+            this.position.y = effectiveFloorHeight;
             if (this.velocity.y <= this.gravity) {
                 this.velocity.y = 0;
             }
@@ -334,7 +346,6 @@ export class Airplane {
 
     updateScene() {
         this.model.position.copy(this.position);
-        this.model.position.y += this.centerOffset.y;
     }
 
     checkpointCheck() {
@@ -473,44 +484,44 @@ export class Airplane {
 
     applyThrust() {
         if (!this.model) return;
-                const throttle = this.controls.throttle
+        const throttle = this.controls.throttle
 
-                // If out of fuel, throttle produces no thrust
-                let throttleEff = throttle;
-                if (typeof this.fuel === 'number' && this.fuel <= 0) {
-                    throttleEff = 0;
-                    if (!this._noFuelWarned) {
-                        try { soundManager.playEmpty(); } catch(e) {}
-                        this._noFuelWarned = true;
-                    }
-                } else {
-                    this._noFuelWarned = false;
-                }
+        // If out of fuel, throttle produces no thrust
+        let throttleEff = throttle;
+        if (typeof this.fuel === 'number' && this.fuel <= 0) {
+            throttleEff = 0;
+            if (!this._noFuelWarned) {
+                try { soundManager.playEmpty(); } catch(e) {}
+                this._noFuelWarned = true;
+            }
+        } else {
+            this._noFuelWarned = false;
+        }
 
-                const throttleToPropSpeed = 2.5
-                if (this.propSpeed < throttleEff * throttleToPropSpeed) {
-                        this.propSpeed = throttleEff * throttleToPropSpeed
-                }
+        const throttleToPropSpeed = 2.5
+        if (this.propSpeed < throttleEff * throttleToPropSpeed) {
+                this.propSpeed = throttleEff * throttleToPropSpeed
+        }
 
-                // 1. Get Forward Direction
-                const forward = this.directions.z;
+        // 1. Get Forward Direction
+        const forward = this.directions.z;
 
-                // 2. Propeller Efficiency (Linear drop-off model)
-                const airSpeed = Math.max(0, this.velocity.dot(forward))*3;
-        
-                const pitchSpeed = 2; // The speed at which the propeller can no longer push air
-                const thrustEfficiency = Math.max(0, 1.0 - (airSpeed / pitchSpeed));
+        // 2. Propeller Efficiency (Linear drop-off model)
+        const airSpeed = Math.max(0, this.velocity.dot(forward))*3;
 
-                // 3. Air Density Effect (Exponential decay with altitude)
-                const altitude = Math.max(0, this.position.y);
-                const densityFactor = 1
-                // const densityFactor = Math.exp(-altitude / 1200); // Scaling factor for density drop-off
+        const pitchSpeed = 2; // The speed at which the propeller can no longer push air
+        const thrustEfficiency = Math.max(0, 1.0 - (airSpeed / pitchSpeed));
+
+        // 3. Air Density Effect (Exponential decay with altitude)
+        const altitude = Math.max(0, this.position.y);
+        const densityFactor = 1
+        // const densityFactor = Math.exp(-altitude / 1200); // Scaling factor for density drop-off
 
 
-                // 4. Calculate final magnitude
-                const thrustMagnitude = throttleEff * thrustEfficiency * densityFactor * 0.03 * (this.speedMultiplier || 1);
+        // 4. Calculate final magnitude
+        const thrustMagnitude = throttleEff * thrustEfficiency * densityFactor * 0.03 * (this.speedMultiplier || 1);
 
-                this.velocity.addScaledVector(forward, thrustMagnitude);
+        this.velocity.addScaledVector(forward, thrustMagnitude);
     }
 
     applyDrag() {
@@ -531,9 +542,9 @@ export class Airplane {
         this.velocity.addScaledVector(dir.y, yDrag);
         this.velocity.addScaledVector(dir.z, zDrag);
 
-        const zAngularDragCoeff = 0.05 * crashDragFactor; 
+        const zAngularDragCoeff = 0.09 * crashDragFactor; 
         const yAngularDragCoeff = 0.02 * crashDragFactor;
-        const xAngularDragCoeff = 0.04 * crashDragFactor;
+        const xAngularDragCoeff = 0.07 * crashDragFactor;
 
         // add angular drag from angular velocity
         this.angularVelocity.addScaledVector(dir.x, -avel.x * xAngularDragCoeff);
@@ -614,7 +625,7 @@ export class Airplane {
             opacity: 1.0
         });
         const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(this.position.x, this.position.y, this.position.z);
+        mesh.position.set(this.position.x, this.position.y + this.groundOffset.y, this.position.z);
         this.scene.add(mesh);
         
         this.particles.push({
@@ -628,36 +639,6 @@ export class Airplane {
         this.position.x = x;
         this.position.y = y;
         this.position.z = z;
-    }
-
-    reset() {
-        this.isCrashed = false;
-        this.velocity.set(0, 0, 0);
-        this.relativeVelocity.set(0, 0, 0);
-        this.angularVelocity.set(0, 0, 0);
-        this.relativeAngularVelocity.set(0, 0, 0);
-        this.propSpeed = 0;
-        this.fireCounter = 0;
-        this.fireAuto = false;
-        this.wasAirborne = false;
-
-        // Clear particles (explosion/trail)
-        if (this.particles && this.particles.length) {
-            this.particles.forEach(p => {
-                try { this.scene.remove(p.mesh); } catch (e) {}
-            });
-            this.particles = [];
-        }
-
-        // Reset controls to neutral
-        this.controls = { aileronLeft: 0, aileronRight: 0, elevatorLeft: 0, elevatorRight: 0, flaps: 0, steeringWheel: 0, throttle: 0 };
-
-        this._noFuelWarned = false;
-
-        // Reset orientation if model loaded
-        if (this.model) {
-            this.setRotation(0, 0, 0);
-        }
     }
 
     setVelocity(x, y, z) {
@@ -674,6 +655,12 @@ export class Airplane {
         // Use the same 'YXZ' order here to remain consistent with calculateObservedInfo
         const euler = new THREE.Euler(x, y, z, 'YXZ');
         this.model.quaternion.setFromEuler(euler);
+    }
+
+    setAngularVelocity(x, y, z) {
+        this.angularVelocity.x = x;
+        this.angularVelocity.y = y;
+        this.angularVelocity.z = z;
     }
 
     setRotationX(angle) {
@@ -693,25 +680,10 @@ export class Airplane {
         const euler = new THREE.Euler(this.rotation.x, this.rotation.y, this.rotation.z, 'YXZ');
         this.model.quaternion.setFromEuler(euler);
     }
-    
-    // Rotation methods
-    applyPitch(angle) {
-        this.setElevatorLeft(angle)
-        this.setElevatorRight(angle)
-    }
-    
-    applyRoll(angle) {
-        this.setAileronLeft(angle)
-        this.setAileronRight(-angle)
-    }
-    
-    applyYaw(angle) {
-        this.setElevatorLeft(angle)
-        this.setElevatorRight(-angle)
-    }
 
     updateKeys(keys) {
         if (this.isCrashed) return; // No control when crashed
+        if (this.codeRunner.running) return; // Disable manual controls when code is running
 
         const angle = 16;
         this.controls.aileronLeft = 0;
@@ -752,7 +724,7 @@ export class Airplane {
             this.controls.throttle = 0.8;
         }
         // Fire with a cooldown so holding the key doesn't spawn bullets every frame
-        if (keys.has('k')) {
+        if (keys.has('r')) {
             const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
             if (!this._lastShotAt) this._lastShotAt = 0;
             const cooldownMs = 150; // ~6 shots per second, tuneable
@@ -810,6 +782,94 @@ export class Airplane {
         return 10
     }
 
+    getApi() {
+        return {
+            setAileronLeft: (instance, value) => {
+                this.controls.aileronLeft = value;
+            },
+            setAileronRight: (instance, value) => {
+                this.controls.aileronRight = value;
+            },
+            setElevatorLeft: (instance, value) => {
+                this.controls.elevatorLeft = value;
+            },
+            setElevatorRight: (instance, value) => {
+                this.controls.elevatorRight = value;
+            },
+            setFlaps: (instance, value) => {
+                this.controls.flaps = value;
+            },
+            setSteeringWheel: (instance, value) => {
+                this.controls.steeringWheel = value;
+            },
+            setThrottle: (instance, value) => {
+                this.controls.throttle = value;
+            },
+            shoot: (instance) => {
+                this.shoot();
+            },
+        }
+    }
+
+    updateCodeRunner() {
+        const info = {
+            airplane: {
+                position: {
+                    x: 0,
+                    y: 0,
+                    z: 0
+                },
+                rotation: {
+                    x: 0,
+                    y: 0,
+                    z: 0
+                },
+                velocity: {
+                    x: 0,
+                    y: 0,
+                    z: 0
+                },
+                angular_velocity: {
+                    x: 0,
+                    y: 0,
+                    z: 0
+                },
+                air_speed: {
+                    x: 0,
+                    y: 0,
+                    z: 0
+                },
+                controls: this.controls
+            },
+        };
+
+        info.airplane.position.x = parseFloat(this.position.x.toFixed(2));
+        info.airplane.position.y = parseFloat(this.position.y.toFixed(2));
+        info.airplane.position.z = parseFloat(this.position.z.toFixed(2));
+
+        // convert from radians to degrees for easier reading in the editor
+        info.airplane.rotation.x = parseFloat((this.rotation.x * (180 / Math.PI)).toFixed(2));
+        info.airplane.rotation.y = parseFloat((this.rotation.y * (180 / Math.PI)).toFixed(2));
+        info.airplane.rotation.z = parseFloat((this.rotation.z * (180 / Math.PI)).toFixed(2));
+
+        info.airplane.velocity.x = parseFloat(this.velocity.x.toFixed(2));
+        info.airplane.velocity.y = parseFloat(this.velocity.y.toFixed(2));
+        info.airplane.velocity.z = parseFloat(this.velocity.z.toFixed(2));
+        
+        info.airplane.air_speed.x = parseFloat(this.relativeVelocity.x.toFixed(2));
+        info.airplane.air_speed.y = parseFloat(this.relativeVelocity.y.toFixed(2));
+        info.airplane.air_speed.z = parseFloat(this.relativeVelocity.z.toFixed(2));
+
+        // setting angular velocity (as relative angular velocity)
+        info.airplane.angular_velocity.x = parseFloat(this.relativeAngularVelocity.x.toFixed(2));
+        info.airplane.angular_velocity.y = parseFloat(this.relativeAngularVelocity.y.toFixed(2));
+        info.airplane.angular_velocity.z = parseFloat(this.relativeAngularVelocity.z.toFixed(2));
+
+        info.airplane.controls = this.controls;
+        this.info = info;
+        this.codeRunner.setInfo(info);
+    }
+
     loadModel() {
         const loader = new GLTFLoader();
         loader.load(
@@ -826,7 +886,7 @@ export class Airplane {
                 model.scale.set(scale, scale, scale);
                 model.position.set(0, 0, 0);
 
-                // 2. Identify Propeller Parts and Shift ONLY the airframe
+                // 2. Identify Propeller Parts
                 this.propeller = new THREE.Group();
                 let propellerParts = [];
 
@@ -835,65 +895,43 @@ export class Airplane {
                         child.castShadow = true;
                         child.receiveShadow = true;
                         
-                        const isPropPart = child.name === 'SIERRA_ARC_GND_0824002_1' || child.name === 'SIERRA_ARC_GND_0824002'
+                        const isPropPart = child.name === 'SIERRA_ARC_GND_0824002_1' || child.name === 'SIERRA_ARC_GND_0824002';
                         if (isPropPart) {
                             propellerParts.push(child);
                         }
                     }
                 });
 
-                const worldPos = new THREE.Vector3();
-                propellerParts[0].getWorldPosition(worldPos);
-                model.worldToLocal(worldPos);
-                
-                this.propeller.position.copy(worldPos);
-                model.add(this.propeller);
+                if (propellerParts.length > 0) {
+                    const worldPos = new THREE.Vector3();
+                    propellerParts[0].getWorldPosition(worldPos);
+                    
+                    model.worldToLocal(worldPos);
+                    this.propeller.position.copy(worldPos);
+                    model.add(this.propeller);
 
-                propellerParts.forEach(part => {
-                    this.propeller.add(part);
-                    // Reset parts to local zero so they don't have "hidden" offsets
-                    part.position.set(0, 0, 0);
-                    part.scale.set(1, 1, 1); 
-                });
+                    propellerParts.forEach(part => {
+                        this.propeller.add(part);
+                        part.position.set(0, 0, 0);
+                        part.scale.set(1, 1, 1); 
+                    });
 
-                const cOffset = {
-                    x: this.centerOffset.x,
-                    y: this.centerOffset.y,
-                    z: this.centerOffset.z
+                    const globalPropScale = 0.01;
+                    this.propeller.scale.set(globalPropScale, globalPropScale, globalPropScale);
                 }
-                cOffset.y = cOffset.y / scale
-
-                const globalPropScale = 0.01;
-                this.propeller.scale.set(globalPropScale, globalPropScale, globalPropScale);
-                this.propeller.position.x += cOffset.x * globalPropScale
-                this.propeller.position.y += cOffset.y * globalPropScale
-                this.propeller.position.z += cOffset.z * globalPropScale
                 
-                model.traverse((child) => {
-                    if (child.isMesh) {
-                        const isPropPart = child.name === 'SIERRA_ARC_GND_0824002_1' || child.name === 'SIERRA_ARC_GND_0824002'
-                        if (!isPropPart) {
-                            child.position.set(cOffset.x, cOffset.y, cOffset.z)
-                            
-                        }
-                        
-                    }
-                });
-                
+                // 3. Assign directly to scene (Uses asset's native 0,0,0)
                 this.model = model;
                 this.scene.add(model);
 
                 // Compute bounding box for size calculations
                 const boundingBox = new THREE.Box3().setFromObject(model);
                 this.boundingSize = boundingBox.getSize(new THREE.Vector3());
-                this.boundingRadius = this.boundingSize.length() / 2; // Approximate radius as half the diagonal
+                this.boundingRadius = this.boundingSize.length() / 2;
             },
-            (progress) => {
-                // console.log('Loading model:', (progress.loaded / progress.total * 100) + '%');
-            },
+            (progress) => {},
             (error) => {
                 console.error('Error loading model:', error);
-                console.log('Using fallback airplane model');
             }
         );
     }

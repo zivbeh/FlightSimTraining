@@ -101,6 +101,7 @@ export class World {
         const ground = new THREE.Mesh(planeGeo, planeMat);
         ground.rotation.x = -Math.PI / 2;
         ground.receiveShadow = true;
+        ground.position.y = 0;
         this.scene.add(ground);
     }
 

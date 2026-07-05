@@ -27,6 +27,7 @@
             <div class="top-right-buttons">
                 <button id="restartBtn" onclick="this.blur();">Restart</button>
                 <button id="open-upgrades-btn-viewport" onclick="this.blur();">Upgrades</button>
+                <button id="help-btn-viewport" onclick="this.blur();" title="Help">❓</button>
             </div>
             <div id="speedometer">
                 <div class="speed-label">SPEED</div>
@@ -105,6 +106,20 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="help-modal" class="modal" aria-hidden="true">
+        <div class="modal-backdrop" id="help-backdrop"></div>
+        <div class="modal-panel help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title">
+            <div class="modal-header">
+                <h2 id="help-title">Help</h2>
+                <button id="help-close" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body help-body">
+                <div id="help-content">Loading…</div>
+            </div>
         </div>
     </div>
 

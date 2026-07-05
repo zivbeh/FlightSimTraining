@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { World } from './World.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 import { Airplane } from './Airplane.js';
@@ -8,15 +9,17 @@ import Upgrades from './upgrades.js';
 import { UPGRADE_DEFINITIONS } from './upgradesData.js';
 import { Waypoint } from './Waypoint.js';
 import { Rocket } from './Rocket.js';
+import { createCheckpointSystems } from './systems/checkpoints.js';
+import { Item } from './Item.js';
 
 // This creates a robust absolute URL pointing to your text asset
-const fileUrl = new URL('../scripts/demoCode1.txt', import.meta.url).href;
 
-const initialCode = await loadTextFile(fileUrl);
+const initialCode = await loadTextFile('../scripts/4waypoints.txt');
 
 async function loadTextFile(path) {
+    const fileUrl = new URL(path, import.meta.url).href;
     try {
-        const response = await fetch(path);
+        const response = await fetch(fileUrl);
         
         // Check if the file actually exists and was loaded successfully
         if (!response.ok) {
@@ -34,46 +37,139 @@ async function loadTextFile(path) {
 
 // --- Initialize Core ---
 const world = new World('#bg');
-const airplane = new Airplane(world.scene);
-// const rocket = new Rocket(world.scene);
+const airplane = new Airplane(world);
 
-
+const item = new Item({
+    position: new THREE.Vector3(20, 4, 30),
+    radius: 12,
+    color: 0x8a2be2,
+    activeColor: 0xffd54f,
+    onEnter: () => {
+        if (airplane && typeof airplane.fuel === 'number' && typeof airplane.fuelCapacity === 'number') {
+            airplane.fuel = airplane.fuelCapacity;
+        }
+    }
+});
+item.addToScene(world.scene);
 
 const controls = new OrbitControls(world.camera, world.renderer.domElement);
-const checkpoint1 = new Waypoint(world, {
-    radius: 4,
-    height: 100,
-    startHeight: 50,
-    color: 'rgb(255, 0, 0)',
-    opacity: 0.25
-});
-checkpoint1.setPosition(0, 30, 200);
-const checkpoint2 = new Waypoint(world, {
-    radius: 4,
-    height: 15,
-    startHeight: 0,
-    color: 'rgb(255, 0, 0)',
-    opacity: 0.25
-});
-checkpoint2.setPosition(0, 0, 40);
 
-const checkpoint3 = new Waypoint(world, {
-    radius: 4,
-    height: 15,
-    startHeight: 0,
-    color: 'rgb(255, 0, 0)',
-    opacity: 0.25
+// Checkpoint configuration: mixed reward points and flying stations
+// Progressive altitude (200m spacing), sparse stations
+const checkpointConfig = [
+    {
+        id: 'cp1',
+        position: { x: 0, y: 100, z: 100 },
+        hasStation: false,  // Pure reward checkpoint
+        reward: { fuel: 25, money: 150 },
+        radius: 6
+    },
+    {
+        id: 'cp2',
+        position: { x: 80, y: 300, z: 150 },
+        hasStation: true,   // Full landing station
+        reward: { fuel: 100, money: 50 },  // Refuel on safe landing + small bonus
+        radius: 8
+    },
+    {
+        id: 'cp3',
+        position: { x: -60, y: 500, z: 220 },
+        hasStation: false,  // Pure reward checkpoint
+        reward: { fuel: 40, money: 100 },
+        radius: 6
+    },
+    {
+        id: 'cp4',
+        position: { x: 100, y: 700, z: 300 },
+        hasStation: true,   // Full landing station
+        reward: { fuel: 100, money: 50 },  // Refuel on safe landing + small bonus
+        radius: 8
+    }
+];
+
+// Create waypoint objects from config
+const checkpoints = checkpointConfig.map((config) => {
+    const isStation = config.hasStation;
+    
+    const waypoint = new Waypoint(world, {
+        ...(isStation ? {
+            width: 48,        // Same as runway width (40 * 1.2)
+            depth: 52,        // Middle third of runway length (40 * 1.3)
+            height: 16,       // 1/3 of original height (~50/3)
+            type: 'box'       // Use box geometry for landing areas
+        } : {
+            radius: config.radius,
+            height: 50
+        }),
+        color: 'rgb(255, 0, 0)',
+        opacity: 0.25,
+        startHeight: 0
+    });
+    
+    // For stations, position checkpoint at runway surface level (platformHeight = 5)
+    // For regular checkpoints, position at the configured altitude
+    if (isStation) {
+        const runwayBaseHeight = config.position.y + 5; // checkpoint altitude + runway platform height
+        waypoint.setPosition(config.position.x, runwayBaseHeight, config.position.z);
+    } else {
+        waypoint.setPosition(config.position.x, config.position.y, config.position.z);
+    }
+    
+    waypoint.config = config;  // Store metadata
+    return waypoint;
 });
-checkpoint3.setPosition(20, 0, 80);
-const checkpoint4 = new Waypoint(world, {
-    radius: 4,
-    height: 10,
-    startHeight: 40,
-    color: 'rgb(255, 0, 0)',
-    opacity: 0.25
+const checkpointState = { lastCheckpoint: null };
+
+const checkpointSystems = createCheckpointSystems({
+    world,
+    checkpoints,
+    airplane,
+    showBanner: (message) => {
+        if (checkpointBanner) {
+            checkpointBanner.textContent = message;
+            checkpointBanner.style.display = 'block';
+            checkpointBanner.style.opacity = '1';
+            if (checkpointBannerTimer) clearTimeout(checkpointBannerTimer);
+            checkpointBannerTimer = window.setTimeout(() => {
+                checkpointBanner.style.opacity = '0';
+                window.setTimeout(() => {
+                    checkpointBanner.style.display = 'none';
+                }, 260);
+            }, 2400);
+        }
+    }
 });
-checkpoint4.setPosition(-40, 0, 300);
-const checkpoints = [checkpoint1, checkpoint2, checkpoint3, checkpoint4];
+checkpointSystems.build();
+
+// Give airplane access to runway collision system
+airplane.checkpointSystems = checkpointSystems;
+
+const checkpointBanner = document.createElement('div');
+checkpointBanner.id = 'checkpoint-banner';
+checkpointBanner.textContent = 'Checkpoint Reached — Respawn Ready';
+checkpointBanner.style.position = 'fixed';
+checkpointBanner.style.top = '22px';
+checkpointBanner.style.left = '50%';
+checkpointBanner.style.transform = 'translateX(-50%)';
+checkpointBanner.style.padding = '10px 16px';
+checkpointBanner.style.borderRadius = '999px';
+checkpointBanner.style.background = 'rgba(10, 20, 35, 0.9)';
+checkpointBanner.style.color = '#fff';
+checkpointBanner.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+checkpointBanner.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.35)';
+checkpointBanner.style.fontSize = '14px';
+checkpointBanner.style.fontWeight = '600';
+checkpointBanner.style.zIndex = '1000';
+checkpointBanner.style.pointerEvents = 'none';
+checkpointBanner.style.opacity = '0';
+checkpointBanner.style.transition = 'opacity 0.25s ease';
+checkpointBanner.style.display = 'none';
+document.body.appendChild(checkpointBanner);
+let checkpointBannerTimer = null;
+
+function respawnAtCheckpoint(targetCheckpoint = null) {
+    checkpointSystems.respawnAtCheckpoint(targetCheckpoint);
+}
 
 // Game state: money, score, flight time
 window.gameState = {
@@ -86,98 +182,8 @@ window.gameState = {
 
 Obstacle.initObstacles(world.scene);
 
-const editorInfo = {
-    airplane: {
-        pos: {
-            x: 0,
-            y: 0,
-            z: 0
-        },
-        velocity: {
-            x: 0,
-            y: 0,
-            z: 0
-        },
-        air_speed: {
-            x: 0,
-            y: 0,
-            z: 0
-        },
-        controls: airplane.controls
-    },
-    keys: new Set(),
-};
-
-const editorApi = {
-    setAileronLeft: (instance, value) => {
-        airplane.controls.aileronLeft = value;
-    },
-    setAileronRight: (instance, value) => {
-        airplane.controls.aileronRight = value;
-    },
-    setElevatorLeft: (instance, value) => {
-        airplane.controls.elevatorLeft = value;
-    },
-    setElevatorRight: (instance, value) => {
-        airplane.controls.elevatorRight = value;
-    },
-    setFlaps: (instance, value) => {
-        airplane.controls.flaps = value;
-    },
-    setSteeringWheel: (instance, value) => {
-        airplane.controls.steeringWheel = value;
-    },
-    setThrottle: (instance, value) => {
-        airplane.controls.throttle = value;
-    },
-};
-
-// const initialCode = 
-// `setThrottle(1)
-// await sleep(1000)
-// setElevatorLeft(-16)
-// setElevatorRight(-16)
-// `
-
-
-setInterval(() => {
-    editorInfo.airplane.pos.x = parseFloat(airplane.position.x.toFixed(2));
-    editorInfo.airplane.pos.y = parseFloat(airplane.position.y.toFixed(2));
-    editorInfo.airplane.pos.z = parseFloat(airplane.position.z.toFixed(2));
-
-    editorInfo.airplane.velocity.x = parseFloat(airplane.velocity.x.toFixed(2));
-    editorInfo.airplane.velocity.y = parseFloat(airplane.velocity.y.toFixed(2));
-    editorInfo.airplane.velocity.z = parseFloat(airplane.velocity.z.toFixed(2));
-
-    
-    editorInfo.airplane.air_speed.x = parseFloat(airplane.relativeVelocity.x.toFixed(2));
-    editorInfo.airplane.air_speed.y = parseFloat(airplane.relativeVelocity.y.toFixed(2));
-    editorInfo.airplane.air_speed.z = parseFloat(airplane.relativeVelocity.z.toFixed(2));
-
-    editorInfo.airplane.controls = airplane.controls;
-    
-    // editorInfo.airplane.pos.x =;
-    // editorInfo.missile.pos.x = parseFloat(editorInfo.missile.pos.x.toFixed(2));
-    codeEditor.setInfo(editorInfo);
-}, 30);
-
-window.addEventListener('keydown', (e) => {
-    if (!codeEditor.isFocused && !editorInfo.keys.has(e.key)) {
-        editorInfo.keys.add(e.key);
-        codeEditor.setInfo(editorInfo);
-    }
-});
-
-window.addEventListener('keyup', (e) => {
-    if (!codeEditor.isFocused && editorInfo.keys.has(e.key)) {
-        editorInfo.keys.delete(e.key);
-        codeEditor.setInfo(editorInfo);
-    }
-});
-
-
 // --- 2. Instantiate CodeEditor ---
-const codeEditor = new CodeEditor(editorInfo, editorApi, initialCode);
+const codeEditor = new CodeEditor(airplane, initialCode);
 
 // --- Upgrades ---
 const upgrades = new Upgrades();
@@ -279,22 +285,108 @@ if (upgradesBackdrop) upgradesBackdrop.addEventListener('click', closeUpgradesMo
 const upgradesClose = document.getElementById('upgrades-close');
 if (upgradesClose) upgradesClose.addEventListener('click', closeUpgradesModal);
 
+const helpBtnViewport = document.getElementById('help-btn-viewport');
+const helpModal = document.getElementById('help-modal');
+const helpBackdrop = document.getElementById('help-backdrop');
+const helpClose = document.getElementById('help-close');
+const helpContent = document.getElementById('help-content');
+
+function escapeHtml(text) {
+    return String(text)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
+function parseMarkdownToHtml(markdown) {
+    const lines = String(markdown).replace(/\r\n/g, '\n').split('\n');
+    const htmlParts = [];
+    let paragraphLines = [];
+    let listItems = [];
+
+    const flushParagraph = () => {
+        if (paragraphLines.length) {
+            htmlParts.push(`<p>${paragraphLines.join(' ')}</p>`);
+            paragraphLines = [];
+        }
+    };
+
+    const flushList = () => {
+        if (listItems.length) {
+            htmlParts.push(`<ul>${listItems.map((item) => `<li>${item}</li>`).join('')}</ul>`);
+            listItems = [];
+        }
+    };
+
+    lines.forEach((line) => {
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+            flushParagraph();
+            flushList();
+            return;
+        }
+
+        const headingMatch = trimmed.match(/^(#{1,3})\s+(.*)$/);
+        if (headingMatch) {
+            flushParagraph();
+            flushList();
+            const level = Math.min(headingMatch[1].length, 3);
+            htmlParts.push(`<h${level}>${escapeHtml(headingMatch[2].trim())}</h${level}>`);
+            return;
+        }
+
+        if (trimmed.startsWith('- ')) {
+            flushParagraph();
+            listItems.push(escapeHtml(trimmed.slice(2).trim()));
+            return;
+        }
+
+        flushList();
+        paragraphLines.push(escapeHtml(trimmed));
+    });
+
+    flushParagraph();
+    flushList();
+    return htmlParts.join('');
+}
+
+function openHelpModal() {
+    if (!helpModal || !helpContent) return;
+    helpModal.setAttribute('aria-hidden', 'false');
+    fetch('./help.md')
+        .then((response) => {
+            if (!response.ok) throw new Error('Help file not found');
+            return response.text();
+        })
+        .then((text) => {
+            if (!helpContent) return;
+            helpContent.innerHTML = parseMarkdownToHtml(text);
+        })
+        .catch(() => {
+            if (helpContent) helpContent.textContent = 'Help content could not be loaded.';
+        });
+}
+
+function closeHelpModal() {
+    if (helpModal) helpModal.setAttribute('aria-hidden', 'true');
+}
+
+if (helpBtnViewport) helpBtnViewport.addEventListener('click', openHelpModal);
+if (helpBackdrop) helpBackdrop.addEventListener('click', closeHelpModal);
+if (helpClose) helpClose.addEventListener('click', closeHelpModal);
+
 const restartBtn = document.getElementById('restartBtn');
 if (restartBtn) {
     restartBtn.addEventListener('click', () => {
-        airplane.restart();
-        for (const cp of checkpoints) {
-            cp.mesh.material.color.copy(cp.originalColor);
+        respawnAtCheckpoint(checkpointState.lastCheckpoint);
+        // reset flight time and score for new run
+        if (window.gameState) {
+            window.gameState.flightTime = 0;
+            window.gameState.score = 0;
         }
-        // Refresh editor info so UI and input state update immediately
-        codeEditor.setInfo(editorInfo);
-                // reset flight time and score for new run
-                if (window.gameState) {
-                    window.gameState.flightTime = 0;
-                    window.gameState.score = 0;
-                }
-                // reset fuel to capacity
-                if (typeof airplane.fuelCapacity === 'number') airplane.fuel = airplane.fuelCapacity;
     });
 }
 
@@ -440,7 +532,6 @@ class InputController {
 }
 
 const inputController = new InputController();
-// const thirdPersonCamera = new ThirdPersonCamera(world.camera, rocket);
 const thirdPersonCamera = new ThirdPersonCamera(world.camera, airplane);
 
 // Resume audio on first user interaction (required by some browsers)
@@ -456,8 +547,16 @@ function resumeAudioOnGesture() {
 window.addEventListener('mousedown', resumeAudioOnGesture);
 window.addEventListener('keydown', resumeAudioOnGesture);
 
+// const airplane2 = new Airplane(world);
+// airplane2.setPosition(10, 0, 10);
+// const code2 = await loadTextFile('../scripts/figure8.txt');
+// // run code2 on airplane2
+// setTimeout(() => {
+//     airplane2.codeRunner.run(code2);
+// }, 1000); // Delay to ensure airplane2 is initialized before running code
 
 function animate() {
+    item.update(airplane.position);
     const now = performance.now();
     requestAnimationFrame(animate);
     if (!animate._last) animate._last = now;
@@ -465,16 +564,15 @@ function animate() {
     animate._last = now;
 
     // Update Logic
-    // airplane.updateKeys(inputController.keys);
+    airplane.updateKeys(inputController.keys);
     airplane.updateTime();
+    // airplane2.updateTime();
     // rocket.updateKeys(inputController.keys);
     // rocket.updateTime();
     Obstacle.updateObstacles();
 
-    // Update Waypoint collision status
-    for (const cp of checkpoints) {
-        cp.update(airplane.position);
-    }
+    // Update waypoint collision status and remember the latest checkpoint reached.
+    checkpointSystems.update(airplane.position, checkpointState);
 
     // update HUD: bullets and targets
     try {
@@ -510,6 +608,16 @@ function animate() {
                     if (fuelCapNum) fuelCapNum.textContent = String(Math.floor(airplane.fuelCapacity));
                 }
     } catch (e) {}
+
+    if (airplane.isCrashed && !airplane._respawnQueued) {
+        airplane._respawnQueued = true;
+        window.setTimeout(() => {
+            if (airplane && airplane.isCrashed) {
+                respawnAtCheckpoint(checkpointState.lastCheckpoint);
+            }
+            airplane._respawnQueued = false;
+        }, 1200);
+    }
 
     // Environment Animation
     world.effectController.elevation += 0.02;
