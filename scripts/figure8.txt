@@ -62,9 +62,9 @@ const rollController  = new PIDController(1.2,  0.01, 1,   -15, 15);
 
 startLoop(async () => {
     // Live Data
-    const alt = info.airplane.position.y;
-    const currentPitch = -info.airplane.rotation.x; 
-    const currentRoll = info.airplane.rotation.z;
+    const alt = info.position.y;
+    const currentPitch = -info.rotation.x; 
+    const currentRoll = info.rotation.z;
 
     // API Control: Take-off phase vs. Cruise phase
     if (alt < 10) {

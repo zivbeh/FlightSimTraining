@@ -33,7 +33,7 @@ for any angle input, the value range is from -16 to 16 degrees
 
 ### Built-in Script Helpers
 - log(...args): send messages to the console output panel.
-- sleep(ms): wait for a number of milliseconds before continuing.
+- await sleep(ms): wait for a number of milliseconds before continuing.
 - finish(): stop the running script.
 - startLoop(callback, ms): run a callback repeatedly on a timer.
 - stopLoop(): stop the repeated loop created by startLoop.

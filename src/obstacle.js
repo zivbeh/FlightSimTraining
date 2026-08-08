@@ -88,6 +88,8 @@ class Obstacle {
     // optional price for rewards
     this.price = typeof opts.price === 'number' ? opts.price : (this.maxHealth ? Math.max(5, Math.floor(this.maxHealth/3)) : 0);
     this.healthBarMesh = null;
+    this._boundsSize = new THREE.Vector3();
+    this._barPosition = new THREE.Vector3();
     if (this.maxHealth) {
       const barGeo = new THREE.BoxGeometry(1, 0.12, 0.12);
       const barMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
@@ -117,6 +119,18 @@ class Obstacle {
     }
 
     if (opts.scene) opts.scene.add(this.mesh);
+    this._refreshBoundsSize();
+  }
+
+  _refreshBoundsSize() {
+    if (!this.mesh) return;
+    try {
+      this.mesh.updateMatrixWorld(true);
+      const bbox = new THREE.Box3().setFromObject(this.mesh);
+      bbox.getSize(this._boundsSize);
+    } catch (e) {
+      this._boundsSize.set(1, 1, 1);
+    }
   }
 
   _createMesh(){
@@ -189,11 +203,9 @@ class Obstacle {
 
     if (this.healthBarMesh) {
       // position health bar slightly above the obstacle
-      const bbox = new THREE.Box3().setFromObject(this.mesh);
-      const size = bbox.getSize(new THREE.Vector3());
-      const top = this.mesh.position.clone();
-      top.y += (size.y / 2) + 0.6;
-      this.healthBarMesh.position.copy(top);
+      this._barPosition.copy(this.mesh.position);
+      this._barPosition.y += (this._boundsSize.y || 1) / 2 + 0.6;
+      this.healthBarMesh.position.copy(this._barPosition);
       const ratio = this.maxHealth ? Math.max(0, this.health) / this.maxHealth : 0;
       this.healthBarMesh.scale.x = Math.max(0.001, ratio);
       if (this.healthBarMesh.material) {

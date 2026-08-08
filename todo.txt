@@ -1,0 +1,10 @@
+add interactive explanation about api functions
+add game mode and levels
+when restart, plane start with height not 0, fix it
+make infinite world
+add world decoration
+in code editor, allow control tab and comment mutliple lines at once
+better naming: instead of main.js, should be plane.js
+free style infinite fuel mode
+button to copy the code, and button to download the code as txt file, and also load from txt
+control camera view from mouse relative to plane camera

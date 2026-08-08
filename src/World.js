@@ -4,6 +4,8 @@ import { Sky } from 'https://unpkg.com/three@0.160.0/examples/jsm/objects/Sky.js
 export class World {
     constructor(canvasId) {
         this.canvas = document.querySelector(canvasId);
+        this.canvas.setAttribute('tabindex', '0');
+        
         this.viewport = this.canvas ? this.canvas.parentElement : null;
         this.scene = new THREE.Scene();
 
@@ -18,14 +20,15 @@ export class World {
         // Setup Renderer
         this.renderer = new THREE.WebGLRenderer({ 
             canvas: this.canvas, 
-            antialias: true 
+            antialias: true,
+            powerPreference: 'high-performance'
         });
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
         this.renderer.setSize(this.width, this.height);
         
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
         // Environment properties
         this.sun = new THREE.Vector3();
@@ -67,9 +70,9 @@ export class World {
         this.sun.setFromSphericalCoords(1, phi, theta);
         uniforms['sunPosition'].value.copy(this.sun);
 
-        if (this.directionalLight) {
-            this.directionalLight.position.copy(this.sun);
-        }
+        // if (this.directionalLight) {
+        //     this.directionalLight.position.copy(this.sun);
+        // }
     }
 
     _initLights() {
@@ -84,7 +87,7 @@ export class World {
         this.directionalLight.shadow.camera.right = d;
         this.directionalLight.shadow.camera.top = d;
         this.directionalLight.shadow.camera.bottom = -d;
-        this.directionalLight.shadow.mapSize.set(1024, 1024);
+        this.directionalLight.shadow.mapSize.set(512, 512);
 
         this.scene.add(this.directionalLight);
         this.scene.add(this.directionalLight.target);

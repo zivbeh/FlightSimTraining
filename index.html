@@ -26,31 +26,51 @@
             <canvas id="bg" class="canvas"></canvas>
             <div class="top-right-buttons">
                 <button id="restartBtn" onclick="this.blur();">Restart</button>
-                <button id="open-upgrades-btn-viewport" onclick="this.blur();">Upgrades</button>
-                <button id="help-btn-viewport" onclick="this.blur();" title="Help">❓</button>
-            </div>
-            <div id="speedometer">
-                <div class="speed-label">SPEED</div>
-                <div class="speed-needle"></div>
-                <div class="speed-value">0.00</div>
-                <div class="speed-unit">m/s</div>
-            </div>
-            
-            <div id="altimeter">
-                <div class="alt-label">ALT</div>
-                <div class="alt-bar-container">
-                    <div class="alt-bar-fill"></div>
+                <div class="main-menu-control">
+                    <button id="main-menu-btn" class="hamburger-btn" type="button" aria-label="Open game menu" aria-haspopup="menu" aria-expanded="false">
+                        <span></span><span></span><span></span>
+                    </button>
+                    <div id="main-menu" class="main-menu" role="menu" hidden>
+                        <div class="menu-section-label">Game Mode</div>
+                        <button type="button" role="menuitemradio" data-game-mode="plane">Plane</button>
+                        <button type="button" role="menuitemradio" data-game-mode="quadcopter">Quadcopter</button>
+                        <button type="button" role="menuitemradio" data-game-mode="rocket">Rocket</button>
+                        <div class="menu-separator" role="separator"></div>
+                        <button id="demo-codes-btn" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false">
+                            <span>Demo Codes</span><span class="menu-arrow">›</span>
+                        </button>
+                        <button id="open-upgrades-btn-viewport" type="button" role="menuitem">Upgrades</button>
+                        <button id="help-btn-viewport" type="button" role="menuitem">Help</button>
+                    </div>
+                    <div id="demo-codes-menu" class="main-menu demo-codes-menu" role="menu" hidden>
+                        <button id="demo-codes-back" type="button" role="menuitem" class="menu-back">‹ Main Menu</button>
+                        <div class="menu-section-label">Demo Codes</div>
+                        <div id="demo-codes-list"></div>
+                    </div>
                 </div>
-                <div class="alt-value">0</div>
-                <div class="alt-unit">m</div>
             </div>
-            <!-- HUD: bullets (in-flight) and ammo + targets -->
+            <div id="attitude-indicator" aria-label="Aircraft attitude indicator">
+                <div class="attitude-title">ATTITUDE</div>
+                <canvas id="attitude-canvas"></canvas>
+                <div class="attitude-values">
+                    <span>PITCH <strong id="attitude-pitch">0&deg;</strong></span>
+                    <span>ROLL <strong id="attitude-roll">0&deg;</strong></span>
+                    <span>ALT <strong id="attitude-altitude">0 m</strong></span>
+                    <span>FWD SPD <strong id="attitude-airspeed">0.00 m/s</strong></span>
+                </div>
+            </div>
+            <!-- HUD: first row and second row indicator -->
             <div id="hud">
-                <div id="hud-money">$ <span id="hud-money-count">0</span></div>
-                <div id="hud-score">Score: <span id="hud-score-count">0</span></div>
-                <div id="hud-bullets">In-Flight: <span id="hud-bullets-count">0</span></div>
-                <div id="hud-ammo">Ammo: <span id="hud-ammo-count">0</span></div>
-                <div id="hud-targets">Targets: <span id="hud-targets-count">0</span></div>
+                <div id="hud-row1">
+                    <div id="hud-money">$ <span id="hud-money-count">0</span></div>
+                    <div id="hud-score">Score: <span id="hud-score-count">0</span></div>
+                    <div id="hud-bullets">In-Flight: <span id="hud-bullets-count">0</span></div>
+                    <div id="hud-ammo">Ammo: <span id="hud-ammo-count">0</span></div>
+                    <div id="hud-targets">Targets: <span id="hud-targets-count">0</span></div>
+                </div>
+                <div id="hud-row2">
+                    <div id="hud-next-strip">Next Strip: <span id="hud-next-strip-info">Searching...</span></div>
+                </div>
             </div>
             <!-- Fuel bar at bottom -->
             <div id="fuel-display">

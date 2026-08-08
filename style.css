@@ -137,14 +137,47 @@ html, body {
     left: 20px;
     z-index: 220;
     display: flex;
-    gap: 12px;
-    align-items: center;
+    flex-direction: column;
+    gap: 8px;
     color: #fff;
     font-family: 'Consolas', monospace;
     pointer-events: none;
 }
-#hud > div { background: rgba(0,0,0,0.6); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
-#hud-bullets-count, #hud-targets-count { font-weight: bold; color: #ffd24d; }
+
+#hud-row1 {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+}
+
+#hud-row2 {
+    display: flex;
+    gap: 12px;
+}
+
+#hud-row1 > div,
+#hud-row2 > div {
+    background: rgba(0,0,0,0.6);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+#hud-next-strip {
+    white-space: nowrap;
+}
+
+#hud-next-strip-info {
+    font-weight: bold;
+    color: #66d9ef;
+}
+
+#hud-bullets-count,
+#hud-targets-count {
+    font-weight: bold;
+    color: #ffd24d;
+}
 
 .top-right-buttons {
     position: absolute;
@@ -152,19 +185,49 @@ html, body {
     right: 16px;
     z-index: 260;
     display: flex;
-    gap: 8px;
+    gap: 4px;
+    align-items: center;
 }
-.top-right-buttons button {
+.main-menu-control {
+    display: flex;
+    align-items: center;
+}
+.top-right-buttons button,
+.top-right-buttons .hamburger-btn {
+    height: 36px;
+    min-height: 36px;
     border: none;
     border-radius: 6px;
-    padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.7);
+    padding: 0 12px;
+    background: rgba(0, 122, 204, 0.95);
     color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
 }
 .top-right-buttons button:hover {
-    background: rgba(0, 0, 0, 0.85);
+    background: rgba(0, 122, 204, 0.95);
 }
+.top-right-buttons .hamburger-btn {
+    width: 40px;
+    min-width: 40px;
+    padding: 0;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.hamburger-btn span {
+    width: 18px;
+    height: 2px;
+    background: #fff;
+    border-radius: 1px;
+}
+
+.hamburger-btn span + span {
+    margin-top: 0;
+}
+
 .help-panel {
     max-height: min(80vh, 760px);
 }
@@ -451,6 +514,58 @@ body {
     position: relative;
 }
 
+#attitude-indicator {
+    position: absolute;
+    left: 18px;
+    bottom: 18px;
+    width: 208px;
+    height: 211px;
+    z-index: 300;
+    box-sizing: border-box;
+    padding: 9px 10px 8px;
+    color: #eef7ff;
+    background: linear-gradient(155deg, rgba(25, 37, 50, 0.96), rgba(5, 10, 16, 0.94));
+    border: 1px solid rgba(180, 214, 240, 0.28);
+    border-radius: 13px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    pointer-events: none;
+    backdrop-filter: blur(8px);
+}
+
+.attitude-title {
+    height: 15px;
+    color: #a9bed0;
+    font: 700 10px/15px system-ui, sans-serif;
+    letter-spacing: 0.16em;
+    text-align: center;
+}
+
+#attitude-canvas {
+    display: block;
+    width: 188px;
+    height: 140px;
+}
+
+.attitude-values {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 10px;
+    padding: 1px 4px 0;
+    color: #8fa7ba;
+    font: 600 9px/14px system-ui, sans-serif;
+    letter-spacing: 0.06em;
+}
+
+.attitude-values span:nth-child(even) {
+    text-align: right;
+}
+
+.attitude-values strong {
+    margin-left: 3px;
+    color: #f4d66d;
+    font-size: 10px;
+}
+
 #codeEditor {
     flex: 1;
     background: #1e1e1e;
@@ -605,11 +720,6 @@ body {
     caret-color: #aeafad; /* A bright silver/white cursor */
 }
 
-.top-right-buttons { position: absolute; top: 20px; right: 20px; display:flex; gap:8px; z-index:300; }
-.top-right-buttons button { min-width: 90px; height: 36px; background: rgba(0,122,204,0.95); color:white; border:none; border-radius:5px; cursor:pointer; font-size:14px; }
-.top-right-buttons button:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(0,0,0,0.25); }
-.top-right-buttons #open-upgrades-btn-viewport { background: linear-gradient(180deg,#0a84ff,#0066cc); border: 1px solid rgba(255,255,255,0.06); }
-
 /* HUD money and score styles */
 #hud-money, #hud-score { background: rgba(0,0,0,0.6); padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #fff; }
 #hud-money { color: #b8ffb8; font-weight:700; }
@@ -632,3 +742,155 @@ body {
 #fuel-bar { width: 420px; height: 14px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; overflow: hidden; }
 #fuel-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#00ff88,#00b36b); transform-origin: left; width: 100%; }
 #fuel-count { font-size: 12px; color: #cfeccf; }
+
+canvas:focus {
+  outline: none;
+  -webkit-tap-highlight-color: transparent; /* Removes touch highlight on mobile */
+}
+
+.game-mode-control {
+    position: relative;
+}
+
+.game-mode-menu {
+    position: absolute;
+    top: calc(100% + 7px);
+    left: 0;
+    min-width: 140px;
+    padding: 6px;
+    background: rgba(15, 25, 38, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 7px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.top-right-buttons .game-mode-menu button {
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+    justify-content: flex-start;
+    background: transparent;
+    text-align: left;
+}
+
+.top-right-buttons .game-mode-menu button:hover,
+.top-right-buttons .game-mode-menu button.active {
+    background: rgba(0, 122, 204, 0.85);
+}
+
+/* Main Menu Dropdown */
+.main-menu-control {
+    position: relative;
+}
+
+.main-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 180px;
+    padding: 8px;
+    background: rgba(15, 25, 38, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.main-menu[hidden] {
+    display: none !important;
+}
+
+.menu-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 8px 12px 4px;
+    letter-spacing: 0.5px;
+}
+
+.menu-separator {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 4px 0;
+}
+
+.main-menu button {
+    width: 100%;
+    height: 36px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: #fff;
+    text-align: left;
+    cursor: pointer;
+    font-size: 14px;
+    font-family: 'Segoe UI', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: background 0.15s ease;
+}
+
+.main-menu button:hover {
+    background: rgba(0, 122, 204, 0.7);
+}
+
+.main-menu button:active {
+    background: rgba(0, 122, 204, 0.85);
+}
+
+.main-menu button.active {
+    background: rgba(0, 122, 204, 0.8);
+}
+
+.menu-arrow {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-left: 8px;
+}
+
+.menu-back {
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.menu-back:hover {
+    background: rgba(0, 122, 204, 0.6) !important;
+}
+
+/* Demo Codes Submenu */
+.demo-codes-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+}
+
+#demo-codes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#demo-codes-list button {
+    height: 36px;
+    width: 100%;
+    padding: 0 12px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: #fff;
+    text-align: left;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: 'Segoe UI', sans-serif;
+    transition: background 0.15s ease;
+}
+
+#demo-codes-list button:hover {
+    background: rgba(0, 122, 204, 0.7);
+}
+

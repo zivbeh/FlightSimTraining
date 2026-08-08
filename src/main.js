@@ -11,6 +11,10 @@ import { Waypoint } from './Waypoint.js';
 import { Rocket } from './Rocket.js';
 import { createCheckpointSystems } from './systems/checkpoints.js';
 import { Item } from './Item.js';
+import { Drone } from './Drone.js';
+import { InputController } from './InputController.js';
+import { ThirdPersonCamera } from './Camera.js';
+
 
 // This creates a robust absolute URL pointing to your text asset
 
@@ -38,6 +42,11 @@ async function loadTextFile(path) {
 // --- Initialize Core ---
 const world = new World('#bg');
 const airplane = new Airplane(world);
+const rocket = new Rocket(world);
+const drone = new Drone(world);
+let myAircraft = airplane;
+let activeGameMode = 'plane';
+const aircraftByMode = { plane: airplane, quadcopter: drone, rocket };
 
 const item = new Item({
     position: new THREE.Vector3(20, 4, 30),
@@ -45,8 +54,8 @@ const item = new Item({
     color: 0x8a2be2,
     activeColor: 0xffd54f,
     onEnter: () => {
-        if (airplane && typeof airplane.fuel === 'number' && typeof airplane.fuelCapacity === 'number') {
-            airplane.fuel = airplane.fuelCapacity;
+        if (myAircraft && typeof myAircraft.fuel === 'number' && typeof myAircraft.fuelCapacity === 'number') {
+            myAircraft.fuel = myAircraft.fuelCapacity;
         }
     }
 });
@@ -54,75 +63,47 @@ item.addToScene(world.scene);
 
 const controls = new OrbitControls(world.camera, world.renderer.domElement);
 
-// Checkpoint configuration: mixed reward points and flying stations
-// Progressive altitude (200m spacing), sparse stations
+// Runway checkpoints control landing, rewards, and respawning.
 const checkpointConfig = [
     {
-        id: 'cp1',
-        position: { x: 0, y: 100, z: 100 },
-        hasStation: false,  // Pure reward checkpoint
-        reward: { fuel: 25, money: 150 },
-        radius: 6
+        id: 'runway-1',
+        position: { x: 0, y: 50, z: 300 },
+        reward: { fuel: 100, money: 50 },
+        triggerRadius: 24
     },
     {
-        id: 'cp2',
-        position: { x: 80, y: 300, z: 150 },
-        hasStation: true,   // Full landing station
-        reward: { fuel: 100, money: 50 },  // Refuel on safe landing + small bonus
-        radius: 8
-    },
-    {
-        id: 'cp3',
-        position: { x: -60, y: 500, z: 220 },
-        hasStation: false,  // Pure reward checkpoint
-        reward: { fuel: 40, money: 100 },
-        radius: 6
-    },
-    {
-        id: 'cp4',
+        id: 'runway-2',
         position: { x: 100, y: 700, z: 300 },
-        hasStation: true,   // Full landing station
-        reward: { fuel: 100, money: 50 },  // Refuel on safe landing + small bonus
-        radius: 8
+        reward: { fuel: 100, money: 50 },
+        triggerRadius: 24
     }
 ];
 
-// Create waypoint objects from config
-const checkpoints = checkpointConfig.map((config) => {
-    const isStation = config.hasStation;
-    
+// Waypoints are independent flight markers and do not affect runway respawning.
+const waypointConfig = [
+    { id: 'waypoint-1', position: { x: 0, y: 0, z: 80 }, radius: 6, height: 10 },
+    { id: 'waypoint-2', position: { x: 60, y: 40, z: 200 }, radius: 6, height: 20 },
+    { id: 'waypoint-3', position: { x: 160, y: 80, z: 200 }, radius: 6, height: 20 },
+    { id: 'waypoint-4', position: { x: 160, y: 100, z: 0 }, radius: 6, height: 20 },
+    { id: 'waypoint-5', position: { x: 0, y: 200, z: 0 }, radius: 6, height: 20 },
+];
+
+const waypoints = waypointConfig.map((config) => {
     const waypoint = new Waypoint(world, {
-        ...(isStation ? {
-            width: 48,        // Same as runway width (40 * 1.2)
-            depth: 52,        // Middle third of runway length (40 * 1.3)
-            height: 16,       // 1/3 of original height (~50/3)
-            type: 'box'       // Use box geometry for landing areas
-        } : {
-            radius: config.radius,
-            height: 50
-        }),
-        color: 'rgb(255, 0, 0)',
-        opacity: 0.25,
-        startHeight: 0
+        radius: config.radius,
+        height: config.height,
+        color: config.color ?? 0xff0000,
+        opacity: config.opacity ?? 0.25
     });
-    
-    // For stations, position checkpoint at runway surface level (platformHeight = 5)
-    // For regular checkpoints, position at the configured altitude
-    if (isStation) {
-        const runwayBaseHeight = config.position.y + 5; // checkpoint altitude + runway platform height
-        waypoint.setPosition(config.position.x, runwayBaseHeight, config.position.z);
-    } else {
-        waypoint.setPosition(config.position.x, config.position.y, config.position.z);
-    }
-    
-    waypoint.config = config;  // Store metadata
+    waypoint.id = config.id;
+    waypoint.setPosition(config.position.x, config.position.y, config.position.z);
     return waypoint;
 });
 const checkpointState = { lastCheckpoint: null };
 
 const checkpointSystems = createCheckpointSystems({
     world,
-    checkpoints,
+    checkpointConfigs: checkpointConfig,
     airplane,
     showBanner: (message) => {
         if (checkpointBanner) {
@@ -183,7 +164,7 @@ window.gameState = {
 Obstacle.initObstacles(world.scene);
 
 // --- 2. Instantiate CodeEditor ---
-const codeEditor = new CodeEditor(airplane, initialCode);
+const codeEditor = new CodeEditor(myAircraft, initialCode);
 
 // --- Upgrades ---
 const upgrades = new Upgrades();
@@ -381,12 +362,142 @@ if (helpClose) helpClose.addEventListener('click', closeHelpModal);
 const restartBtn = document.getElementById('restartBtn');
 if (restartBtn) {
     restartBtn.addEventListener('click', () => {
-        respawnAtCheckpoint(checkpointState.lastCheckpoint);
-        // reset flight time and score for new run
+        myAircraft.restart();
         if (window.gameState) {
             window.gameState.flightTime = 0;
             window.gameState.score = 0;
         }
+    });
+}
+
+const mainMenuBtn = document.getElementById('main-menu-btn');
+const mainMenu = document.getElementById('main-menu');
+const gameModeOptions = mainMenu ? [...mainMenu.querySelectorAll('[data-game-mode]')] : [];
+const demoCodesBtn = document.getElementById('demo-codes-btn');
+const demoCodesMenu = document.getElementById('demo-codes-menu');
+const demoCodesBack = document.getElementById('demo-codes-back');
+const demoCodesList = document.getElementById('demo-codes-list');
+
+function closeGameMenus() {
+    if (mainMenu) mainMenu.hidden = true;
+    if (demoCodesMenu) demoCodesMenu.hidden = true;
+    if (mainMenuBtn) mainMenuBtn.setAttribute('aria-expanded', 'false');
+    if (demoCodesBtn) demoCodesBtn.setAttribute('aria-expanded', 'false');
+}
+
+async function loadDemoCode(filename) {
+    if (!filename.endsWith('.txt') || filename.includes('/') || filename.includes('\\')) return;
+    const response = await fetch(`./scripts/${encodeURIComponent(filename)}`);
+    if (!response.ok) throw new Error(`Could not load ${filename}`);
+    codeEditor.editor.value = await response.text();
+    codeEditor.editor.dispatchEvent(new Event('input', { bubbles: true }));
+    codeEditor.editor.focus();
+}
+
+async function buildDemoCodesMenu() {
+    if (!demoCodesList) return;
+    try {
+        const response = await fetch('./scripts/manifest.json');
+        if (!response.ok) throw new Error('Demo code list could not be loaded');
+        const filenames = await response.json();
+        filenames.filter((name) => typeof name === 'string' && name.endsWith('.txt')).forEach((filename) => {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.role = 'menuitem';
+            option.textContent = filename.replace(/\.txt$/i, '');
+            option.title = filename;
+            option.addEventListener('click', async () => {
+                try {
+                    await loadDemoCode(filename);
+                    closeGameMenus();
+                } catch (error) {
+                    console.error(error);
+                }
+            });
+            demoCodesList.appendChild(option);
+        });
+    } catch (error) {
+        const message = document.createElement('div');
+        message.className = 'menu-load-error';
+        message.textContent = 'Demo codes unavailable';
+        demoCodesList.appendChild(message);
+        console.error(error);
+    }
+}
+
+buildDemoCodesMenu();
+
+function syncAircraftVisibility() {
+    Object.entries(aircraftByMode).forEach(([mode, aircraft]) => {
+        if (aircraft.model) aircraft.model.visible = mode === activeGameMode;
+    });
+}
+
+function selectGameMode(mode) {
+    const nextAircraft = aircraftByMode[mode];
+    if (!nextAircraft) return;
+
+    myAircraft = nextAircraft;
+    activeGameMode = mode;
+    myAircraft.restart();
+    thirdPersonCamera.body = myAircraft;
+    if (codeEditor.runner !== myAircraft.codeRunner) {
+        codeEditor.runner.stop();
+        const editorCallbacks = codeEditor.runner.callbacks;
+        codeEditor.actor = myAircraft;
+        codeEditor.runner = myAircraft.codeRunner;
+        codeEditor.runner.callbacks = editorCallbacks;
+    }
+
+    gameModeOptions.forEach((option) => {
+        const selected = option.dataset.gameMode === mode;
+        option.classList.toggle('active', selected);
+        option.setAttribute('aria-checked', String(selected));
+    });
+    if (mainMenuBtn) mainMenuBtn.setAttribute('aria-expanded', 'false');
+    if (mainMenu) mainMenu.hidden = true;
+    syncAircraftVisibility();
+
+    if (window.gameState) {
+        window.gameState.flightTime = 0;
+        window.gameState.score = 0;
+    }
+}
+
+if (mainMenuBtn && mainMenu) {
+    mainMenuBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const opening = mainMenu.hidden;
+        closeGameMenus();
+        mainMenu.hidden = !opening;
+        mainMenuBtn.setAttribute('aria-expanded', String(opening));
+    });
+    demoCodesBtn?.addEventListener('click', () => {
+        mainMenu.hidden = true;
+        demoCodesMenu.hidden = false;
+        demoCodesBtn.setAttribute('aria-expanded', 'true');
+    });
+    demoCodesBack?.addEventListener('click', () => {
+        demoCodesMenu.hidden = true;
+        mainMenu.hidden = false;
+        demoCodesBtn.setAttribute('aria-expanded', 'false');
+    });
+    gameModeOptions.forEach((option) => {
+        option.addEventListener('click', () => selectGameMode(option.dataset.gameMode));
+    });
+    [openUpgradesBtnViewport, helpBtnViewport].forEach((option) => {
+        option?.addEventListener('click', () => {
+            mainMenu.hidden = true;
+            mainMenuBtn.setAttribute('aria-expanded', 'false');
+        });
+    });
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.main-menu-control')) {
+            closeGameMenus();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeGameMenus();
     });
 }
 
@@ -432,107 +543,13 @@ if (splitter && rightPanel) {
     });
 }
 
-class ThirdPersonCamera {
-    constructor(camera, airplane) {
-        this.camera = camera;
-        this.airplane = airplane;
-        this.distance = 20;      // Distance behind the airplane
-        this.height = 8;         // Height above the airplane
-        this.smoothness = 0.1;   // Smoothing factor for camera movement
-    }
 
-    update() {
-        if (!this.airplane.model) return;
-        if (inputController.mouse.left) return
-        // Get the forward vector of the airplane
-        const forward = this.airplane.directions.z;
-        
-        // Calculate desired camera position (behind and above the airplane)
-        const desiredX = this.airplane.position.x - forward.x * this.distance;
-        const desiredY = this.airplane.position.y + this.height;
-        const desiredZ = this.airplane.position.z - forward.z * this.distance;
-        
-        // Smoothly move camera to desired position
-        this.camera.position.x += (desiredX - this.camera.position.x) * this.smoothness;
-        this.camera.position.y += (desiredY - this.camera.position.y) * this.smoothness;
-        this.camera.position.z += (desiredZ - this.camera.position.z) * this.smoothness;
-        
-        // Look at a point slightly ahead of the airplane
-        const lookAheadDistance = 5;
-        const lookAtX = this.airplane.position.x + forward.x * lookAheadDistance;
-        const lookAtY = this.airplane.position.y;
-        const lookAtZ = this.airplane.position.z + forward.z * lookAheadDistance;
-        
-        this.camera.lookAt(lookAtX, lookAtY, lookAtZ);
-    }
-}
 
-class InputController {
-    constructor() {
-        this.keys = new Map();
-        this.mouse = {
-            x: 0,
-            y: 0,
-            left: false,
-            right: false,
-            middle: false,
-            wheelDelta: 0
-        };
-        this.setupEventListeners();
-    }
 
-    setupEventListeners() {
-        // Keyboard
-        window.addEventListener('keydown', (e) => this.handleKeyDown(e), false);
-        window.addEventListener('keyup', (e) => this.handleKeyUp(e), false);
 
-        // Mouse Position
-        window.addEventListener('mousemove', (e) => this.handleMouseMove(e), false);
-
-        // Mouse Buttons
-        window.addEventListener('mousedown', (e) => this.handleMouseButtons(e, true), false);
-        window.addEventListener('mouseup', (e) => this.handleMouseButtons(e, false), false);
-
-        // Mouse Wheel
-        window.addEventListener('wheel', (e) => {
-            this.mouse.wheelDelta = e.deltaY;
-        }, { passive: true });
-
-        // Optional: Context Menu (prevents right-click menu from popping up in-game)
-        window.addEventListener('contextmenu', (e) => e.preventDefault());
-    }
-
-    handleMouseMove(event) {
-        this.mouse.x = event.clientX
-        this.mouse.y = event.clientY
-    }
-
-    handleMouseButtons(event, isDown) {
-        if (event.button === 0) this.mouse.left = isDown;
-        if (event.button === 1) this.mouse.middle = isDown;
-        if (event.button === 2) this.mouse.right = isDown;
-    }
-
-    handleKeyDown(event) {
-        const key = event.key.toLowerCase();
-        if (!this.keys.has(key)) {
-            this.keys.set(key, true);
-        }
-    }
-
-    handleKeyUp(event) {
-        const key = event.key.toLowerCase();
-        this.keys.delete(key);
-    }
-
-    isKeyPressed(key) {
-        return this.keys.has(key.toLowerCase());
-    }
-
-}
-
-const inputController = new InputController();
-const thirdPersonCamera = new ThirdPersonCamera(world.camera, airplane);
+const inputController = new InputController(world.canvas);
+const thirdPersonCamera = new ThirdPersonCamera(world.camera, myAircraft, inputController);
+selectGameMode('plane');
 
 // Resume audio on first user interaction (required by some browsers)
 function resumeAudioOnGesture() {
@@ -547,75 +564,241 @@ function resumeAudioOnGesture() {
 window.addEventListener('mousedown', resumeAudioOnGesture);
 window.addEventListener('keydown', resumeAudioOnGesture);
 
-// const airplane2 = new Airplane(world);
-// airplane2.setPosition(10, 0, 10);
-// const code2 = await loadTextFile('../scripts/figure8.txt');
-// // run code2 on airplane2
-// setTimeout(() => {
-//     airplane2.codeRunner.run(code2);
-// }, 1000); // Delay to ensure airplane2 is initialized before running code
+
+const domHUD = {
+    nextStripInfo: document.getElementById('hud-next-strip-info'),
+    bulletsCount: document.getElementById('hud-bullets-count'),
+    ammoCount: document.getElementById('hud-ammo-count'),
+    targetsCount: document.getElementById('hud-targets-count'),
+    moneyCount: document.getElementById('hud-money-count'),
+    scoreCount: document.getElementById('hud-score-count'),
+    fuelFill: document.getElementById('fuel-fill'),
+    fuelNum: document.getElementById('fuel-count-num'),
+    fuelCapNum: document.getElementById('fuel-capacity-num')
+};
+
+let hudFrameCounter = 0;
+let lastShadowAltitudeRange = -1;
+
+function getNextLandingStrip() {
+    const stations = checkpointSystems.checkpoints;
+    if (stations.length === 0) return null;
+
+    const lastId = checkpointState.lastCheckpoint?.config?.id;
+    const currentIndex = stations.findIndex(cp => cp.config.id === lastId);
+    if (currentIndex >= 0 && currentIndex < stations.length - 1) {
+        return stations[currentIndex + 1];
+    }
+
+    return stations.reduce((closest, cp) => {
+        const dist = cp.position.distanceTo(airplane.position);
+        const bestDist = closest ? closest.position.distanceTo(airplane.position) : Infinity;
+        return dist < bestDist ? cp : closest;
+    }, null);
+}
+
+function updateLandingStripHUD() {
+    if (!domHUD.nextStripInfo) return;
+
+    const nextStrip = getNextLandingStrip();
+    if (!nextStrip) {
+        domHUD.nextStripInfo.textContent = 'No landing strip';
+        return;
+    }
+
+    const dx = nextStrip.position.x - airplane.position.x;
+    const dz = nextStrip.position.z - airplane.position.z;
+    const dy = nextStrip.position.y - airplane.position.y;
+    const distance = Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz));
+
+    domHUD.nextStripInfo.textContent = `${distance}m`;
+}
+
+const attitudeCanvas = document.getElementById('attitude-canvas');
+const attitudePitchValue = document.getElementById('attitude-pitch');
+const attitudeRollValue = document.getElementById('attitude-roll');
+const attitudeAltitudeValue = document.getElementById('attitude-altitude');
+const attitudeAirspeedValue = document.getElementById('attitude-airspeed');
+const attitudeContext = attitudeCanvas?.getContext('2d');
+
+function drawAttitudeIndicator(aircraft) {
+    if (!attitudeCanvas || !attitudeContext || !aircraft?.model) return;
+
+    const rect = attitudeCanvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pixelWidth = Math.round(rect.width * dpr);
+    const pixelHeight = Math.round(rect.height * dpr);
+    if (attitudeCanvas.width !== pixelWidth || attitudeCanvas.height !== pixelHeight) {
+        attitudeCanvas.width = pixelWidth;
+        attitudeCanvas.height = pixelHeight;
+    }
+
+    const ctx = attitudeContext;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const width = rect.width;
+    const height = rect.height;
+    const centerX = width / 2;
+    const centerY = height / 2 + 4;
+    const radius = Math.min(width * 0.43, height * 0.47);
+    const pitch = THREE.MathUtils.clamp(-aircraft.rotation.x, -Math.PI / 2, Math.PI / 2);
+    const roll = THREE.MathUtils.euclideanModulo(aircraft.rotation.z + Math.PI, Math.PI * 2) - Math.PI;
+    const pitchPixels = pitch * 68;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(-roll);
+
+    ctx.fillStyle = '#3b94d1';
+    ctx.fillRect(-radius * 3, -radius * 3, radius * 6, radius * 3 + pitchPixels);
+    const groundGradient = ctx.createLinearGradient(0, pitchPixels, 0, radius * 2);
+    groundGradient.addColorStop(0, '#9a6335');
+    groundGradient.addColorStop(1, '#4f321f');
+    ctx.fillStyle = groundGradient;
+    ctx.fillRect(-radius * 3, pitchPixels, radius * 6, radius * 3);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = 1.2;
+    ctx.font = '600 8px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let degrees = -30; degrees <= 30; degrees += 5) {
+        const y = pitchPixels - degrees * 2.15;
+        const major = degrees % 10 === 0;
+        const halfWidth = major ? 23 : 12;
+        ctx.beginPath();
+        ctx.moveTo(-halfWidth, y);
+        ctx.lineTo(halfWidth, y);
+        ctx.stroke();
+        if (major && degrees !== 0) {
+            ctx.fillText(String(Math.abs(degrees)), -halfWidth - 10, y);
+            ctx.fillText(String(Math.abs(degrees)), halfWidth + 10, y);
+        }
+    }
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-radius * 1.5, pitchPixels);
+    ctx.lineTo(radius * 1.5, pitchPixels);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.strokeStyle = 'rgba(231,242,250,0.72)';
+    ctx.lineWidth = 1.2;
+    [-60, -30, 0, 30, 60].forEach((degrees) => {
+        const angle = THREE.MathUtils.degToRad(degrees - 90);
+        const inner = radius + (degrees === 0 ? 3 : 6);
+        const outer = radius + 11;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
+        ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
+        ctx.stroke();
+    });
+
+    // Fixed aircraft reference symbol.
+    ctx.strokeStyle = '#ffd95a';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-38, 0);
+    ctx.lineTo(-12, 0);
+    ctx.lineTo(-6, 6);
+    ctx.moveTo(38, 0);
+    ctx.lineTo(12, 0);
+    ctx.lineTo(6, 6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd95a';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(210,230,244,0.7)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    if (attitudePitchValue) attitudePitchValue.textContent = `${Math.round(THREE.MathUtils.radToDeg(pitch))}\u00B0`;
+    if (attitudeRollValue) attitudeRollValue.textContent = `${Math.round(THREE.MathUtils.radToDeg(roll))}\u00B0`;
+    if (attitudeAltitudeValue) attitudeAltitudeValue.textContent = `${Math.round(Math.max(aircraft.position.y, 0))} m`;
+    if (attitudeAirspeedValue) attitudeAirspeedValue.textContent = `${aircraft.relativeVelocity.z.toFixed(2)} m/s`;
+}
 
 function animate() {
-    item.update(airplane.position);
+    syncAircraftVisibility();
+    item.update(myAircraft.position);
     const now = performance.now();
     requestAnimationFrame(animate);
     if (!animate._last) animate._last = now;
     const dt = (now - animate._last) / 1000; // seconds
     animate._last = now;
 
+    // Increment frame counter for throttled UI updates
+    hudFrameCounter++;
+
     // Update Logic
-    airplane.updateKeys(inputController.keys);
-    airplane.updateTime();
+    myAircraft.updateKeys(inputController.keys);
+    myAircraft.updateTime();
     // airplane2.updateTime();
-    // rocket.updateKeys(inputController.keys);
-    // rocket.updateTime();
     Obstacle.updateObstacles();
 
     // Update waypoint collision status and remember the latest checkpoint reached.
-    checkpointSystems.update(airplane.position, checkpointState);
+    if (activeGameMode === 'plane') {
+        checkpointSystems.update(airplane.position, checkpointState);
+        waypoints.forEach((waypoint) => waypoint.update(airplane.position));
+    }
 
-    // update HUD: bullets and targets
-    try {
-        const bulletsActive = airplane.bullets ? airplane.bullets.filter(b => b && b.active).length : 0;
-        const hudBul = document.getElementById('hud-bullets-count');
-        if (hudBul) hudBul.textContent = String(bulletsActive);
+    // Throttled HUD updates (Runs roughly 10 times per second instead of 60)
+    if (hudFrameCounter % 6 === 0) {
+        try {
+            const bulletsActive = myAircraft.bullets ? myAircraft.bullets.filter(b => b && b.active).length : 0;
+            if (domHUD.bulletsCount) domHUD.bulletsCount.textContent = String(bulletsActive);
 
-        const hudAmmo = document.getElementById('hud-ammo-count');
-        if (hudAmmo && typeof airplane.ammo === 'number') hudAmmo.textContent = String(airplane.ammo);
-
-        const targets = Object.values(Obstacle.obstacles || {}).filter(o => o && o.health != null && !o._destroyed).length;
-        const hudT = document.getElementById('hud-targets-count');
-        if (hudT) hudT.textContent = String(targets);
-                // money and score HUD
-                const hudMoney = document.getElementById('hud-money-count');
-                if (hudMoney && window.gameState) hudMoney.textContent = String(window.gameState.money);
-                // flight time based score: 1.01^time (time in seconds)
-                if (window.gameState) {
-                    const isAirborne = airplane.position.y > 1;
-                    if (isAirborne) window.gameState.flightTime += dt;
-                    window.gameState.score = Math.floor(Math.pow(1.2, window.gameState.flightTime));
-                    const hudScore = document.getElementById('hud-score-count');
-                    if (hudScore) hudScore.textContent = String(window.gameState.score);
-                }
-                // fuel HUD: update bar and numbers
-                const fuelFill = document.getElementById('fuel-fill');
-                const fuelNum = document.getElementById('fuel-count-num');
-                const fuelCapNum = document.getElementById('fuel-capacity-num');
-                if (fuelFill && typeof airplane.fuel === 'number' && typeof airplane.fuelCapacity === 'number') {
-                    const pct = Math.max(0, Math.min(1, airplane.fuel / airplane.fuelCapacity));
-                    fuelFill.style.width = (pct * 100) + '%';
-                    if (fuelNum) fuelNum.textContent = String(Math.floor(airplane.fuel));
-                    if (fuelCapNum) fuelCapNum.textContent = String(Math.floor(airplane.fuelCapacity));
-                }
-    } catch (e) {}
-
-    if (airplane.isCrashed && !airplane._respawnQueued) {
-        airplane._respawnQueued = true;
-        window.setTimeout(() => {
-            if (airplane && airplane.isCrashed) {
-                respawnAtCheckpoint(checkpointState.lastCheckpoint);
+            if (domHUD.ammoCount) {
+                domHUD.ammoCount.textContent = typeof myAircraft.ammo === 'number' ? String(myAircraft.ammo) : '0';
             }
-            airplane._respawnQueued = false;
+
+            const targets = Object.values(Obstacle.obstacles || {}).filter(o => o && o.health != null && !o._destroyed).length;
+            if (domHUD.targetsCount) domHUD.targetsCount.textContent = String(targets);
+            
+            if (domHUD.moneyCount && window.gameState) {
+                domHUD.moneyCount.textContent = String(window.gameState.money);
+            }
+            
+            if (window.gameState) {
+                const isAirborne = myAircraft.position.y > 1;
+                if (isAirborne) window.gameState.flightTime += (dt * 6); // Account for the 6 skipped frames
+                window.gameState.score = Math.floor(Math.pow(1.2, window.gameState.flightTime));
+                if (domHUD.scoreCount) domHUD.scoreCount.textContent = String(window.gameState.score);
+            }
+            
+            if (typeof myAircraft.fuel === 'number' && typeof myAircraft.fuelCapacity === 'number') {
+                const pct = Math.max(0, Math.min(1, myAircraft.fuel / myAircraft.fuelCapacity));
+                if (domHUD.fuelFill) domHUD.fuelFill.style.width = (pct * 100) + '%';
+                if (domHUD.fuelNum) domHUD.fuelNum.textContent = String(Math.floor(myAircraft.fuel));
+                if (domHUD.fuelCapNum) domHUD.fuelCapNum.textContent = String(Math.floor(myAircraft.fuelCapacity));
+            }
+
+            updateLandingStripHUD();
+        } catch (e) {}
+    }
+
+    // Handle Crash & Respawn
+    if (myAircraft.isCrashed && !myAircraft._respawnQueued) {
+        const crashedAircraft = myAircraft;
+        crashedAircraft._respawnQueued = true;
+        window.setTimeout(() => {
+            if (crashedAircraft.isCrashed) {
+                if (crashedAircraft === airplane) respawnAtCheckpoint(checkpointState.lastCheckpoint);
+                else crashedAircraft.restart();
+            }
+            crashedAircraft._respawnQueued = false;
         }, 1200);
     }
 
@@ -623,46 +806,28 @@ function animate() {
     world.effectController.elevation += 0.02;
     world.updateSun();
 
-        // Fuel consumption: consume fuel while throttle is applied
-        try {
-            if (typeof airplane.fuel === 'number' && typeof airplane.fuelCapacity === 'number') {
-                const throttle = airplane.controls && airplane.controls.throttle ? airplane.controls.throttle : 0;
-                const consumptionPerSecond = 6.0; // units per second at full throttle
-                airplane.fuel = Math.max(0, airplane.fuel - consumptionPerSecond * throttle * dt);
-            }
-        } catch(e) {}
+    // Dynamic Shadows: Recalculate camera projection matrix only in 10-unit altitude thresholds
+    const altitude = Math.max(myAircraft.position.y, 0);
+    const currentAltitudeRange = altitude
 
-    // Dynamic Shadows linked to airplane
-    const altitude = Math.max(airplane.position.y, 0);
-    const dynamicSize = 3 + (altitude * 2);
-    
-    world.directionalLight.shadow.camera.left = -dynamicSize;
-    world.directionalLight.shadow.camera.right = dynamicSize;
-    world.directionalLight.shadow.camera.top = dynamicSize;
-    world.directionalLight.shadow.camera.bottom = -dynamicSize;
-    world.directionalLight.shadow.camera.updateProjectionMatrix();
+    if (currentAltitudeRange !== lastShadowAltitudeRange) {
+        const dynamicSize = 2 + (currentAltitudeRange * 4);
+        world.directionalLight.shadow.camera.left = -dynamicSize;
+        world.directionalLight.shadow.camera.right = dynamicSize;
+        world.directionalLight.shadow.camera.top = dynamicSize;
+        world.directionalLight.shadow.camera.bottom = -dynamicSize;
+        world.directionalLight.shadow.camera.updateProjectionMatrix();
+        lastShadowAltitudeRange = currentAltitudeRange;
+    }
 
     // Light follows airplane
-    world.directionalLight.position.copy(airplane.position).addScaledVector(world.sun, 50);
-    world.directionalLight.target.position.copy(airplane.position);
+    world.directionalLight.position.copy(myAircraft.position).addScaledVector(world.sun, 50);
+    world.directionalLight.target.position.copy(myAircraft.position);
 
     thirdPersonCamera.update();
-    updateSpeedometer(airplane);
-    
+    drawAttitudeIndicator(myAircraft);
     // Render
     world.render();
-}
-
-function updateSpeedometer(plane) {
-    const speed = plane.relativeVelocity.z;
-    const altitude = Math.max(plane.position.y, 0);
-    
-    document.querySelector('.speed-value').textContent = speed.toFixed(2);
-    const speedRatio = Math.min(speed / 0.6, 1);
-    document.querySelector('.speed-needle').style.transform = `rotate(${-90 + (speedRatio * 90)}deg)`;
-    
-    document.querySelector('.alt-bar-fill').style.height = (Math.min(altitude / 100, 1) * 100) + '%';
-    document.querySelector('.alt-value').textContent = Math.round(altitude);
 }
 
 animate();

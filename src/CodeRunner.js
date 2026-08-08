@@ -105,7 +105,7 @@ export class CodeRunner {
         const libraries = ['https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js'];
         const libString = libraries.map(url => `'${url}'`).join(', ');
 
-        return `
+        const workerCode = `
         (function() {
             "use strict";
             try {
@@ -150,12 +150,15 @@ export class CodeRunner {
             };
             (async function(log, finish, sleep, startLoop, stopLoop) {
                 const self = undefined, globalThis = undefined, importScripts = undefined, fetch = undefined, XMLHttpRequest = undefined, WebSocket = undefined, Function = undefined, onmessage = undefined, onerror = undefined, onunhandledrejection = undefined;
-                try { ${userCode} } catch (err) {
+                try {
+                ${userCode}
+                } catch (err) {
                     log("❌ STARTUP ERROR: " + err.message);
                     postMessage({ cmd: 'FINISH' });
                 }
             })(log, finish, sleep, startLoop, stopLoop);
         })();`;
+        return workerCode;
     }
 
     handleWorkerMessage(data) {
