@@ -92,6 +92,7 @@ export class Body {
                 this.scene.add(model);
                 this.updateModelPosition();
                 this.updateModelRotation();
+                this.onModelLoaded?.(model);
                 
 
                 // Compute bounding box for size calculations
@@ -112,6 +113,9 @@ export class Body {
                     const fallbackModel = new THREE.Mesh(geometry, material);
                     this.model = fallbackModel;
                     this.scene.add(fallbackModel);
+                    this.updateModelPosition();
+                    this.updateModelRotation();
+                    this.onModelLoaded?.(fallbackModel);
                     }
                 }, 10);
             }
@@ -137,28 +141,31 @@ export class DynamicBody extends Body {
     restart() {
         this.setPosition(0, 0, 0);
         this.setVelocity(0, 0, 0);
+        this.relativeVelocity.set(0, 0, 0);
         this.setRotation(0, 0, 0);
         this.setAngularVelocity(0, 0, 0);
+        this.relativeAngularVelocity.set(0, 0, 0);
     }
 
-    updateTime() {
+    updateTime(dt = 1 / 60) {
         if (!this.model) return
         this.calculateObservedInfo()
-        this.updateMovement()
-        this.updateRotation()
+        this.updateMovement(dt)
+        this.updateRotation(dt)
     }
 
-    updateMovement() {
+    updateMovement(dt = 1 / 60) {
         // move from velocity
-        this.position.x += this.velocity.x; 
-        this.position.y += this.velocity.y;
-        this.position.z += this.velocity.z;
+        const frameScale = dt * 60;
+        this.position.x += this.velocity.x * frameScale;
+        this.position.y += this.velocity.y * frameScale;
+        this.position.z += this.velocity.z * frameScale;
         this.model.position.copy(this.position);
     }
 
-    updateRotation() {
+    updateRotation(dt = 1 / 60) {
         // rotate from angular velocity
-        const angle = this.angularVelocity.length();
+        const angle = this.angularVelocity.length() * dt * 60;
         if (angle > 0) {
             const axis = this.angularVelocity.clone().normalize();
             const rotationStep = new THREE.Quaternion().setFromAxisAngle(axis, angle);

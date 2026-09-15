@@ -16,7 +16,7 @@ export class Drone extends Aircraft {
         ];
         // Initialize throttle as an array for multi-rotor control
         this.scale = 4
-        this.loadModel('../assets/quadcopter.glb')
+        this.loadModel('./assets/quadcopter.glb')
         this.restart()
     }
 
@@ -33,15 +33,16 @@ export class Drone extends Aircraft {
         this.controls.throttle = new Array(this.propellers.length).fill(0);
     }
     
-    updateAerodynamics() {
+    updateAerodynamics(dt = 1 / 60) {
         const dc = [0.004, 0.008, 0.004]
         const adc = [0.015, 0.01, 0.015]
-        this.applyDrag(dc, adc)
-        this.applyThrust()
+        this.applyDrag(dc, adc, undefined, dt)
+        this.applyThrust(dt)
     }
     
-    applyThrust() {
+    applyThrust(dt = 1 / 60) {
         if (!this.model) return;
+        const frameScale = dt * 60;
 
         // If out of fuel, motors produce no thrust
         let hasFuel = true;
@@ -76,22 +77,22 @@ export class Drone extends Aircraft {
             const magnitude = throttleEff * thrustEfficiency * baseThrustMagnitude;
             
             // 4. Apply Linear Force
-            this.velocity.addScaledVector(worldThrustDir, magnitude);
+            this.velocity.addScaledVector(worldThrustDir, magnitude * frameScale);
 
             // 5. Apply Torque (r x F - Leverage torque for Pitch/Roll)
             const localForce = prop.direction.clone().multiplyScalar(magnitude);
             const localTorque = new THREE.Vector3().crossVectors(prop.position, localForce);
             const worldTorque = localTorque.applyQuaternion(this.model.quaternion);
-            this.angularVelocity.add(worldTorque);
+            this.angularVelocity.addScaledVector(worldTorque, frameScale);
 
             // 6. Apply Reaction Torque (Counter-torque for Yaw)
             const reactionTorque = worldThrustDir.clone().multiplyScalar(magnitude * prop.torqueFactor * reactionTorqueFactor);
-            this.angularVelocity.add(reactionTorque);
+            this.angularVelocity.addScaledVector(reactionTorque, frameScale);
         });
 
     }
 
-    handleGroundCollision() {
+    handleGroundCollision(dt = 1 / 60) {
         const floorHeight = -this.groundOffset.y;
         // Only check for crash at the moment of impact (transitioning from air to ground)
         if (this.wasAirborne) {
@@ -119,10 +120,10 @@ export class Drone extends Aircraft {
         this.setRotationZ(0)
         this.setRotationX(0)
 
-        this.applyGroundFriction()
+        this.applyGroundFriction(dt)
     }
     
-    applyGroundFriction() {
+    applyGroundFriction(dt = 1 / 60) {
         const dir = this.directions
         const vel = this.relativeVelocity
         const avel = this.relativeAngularVelocity
@@ -130,12 +131,13 @@ export class Drone extends Aircraft {
         const zMuK = 0.2;
         const xMuK = 0.2;
 
-        this.velocity.addScaledVector(dir.x, -vel.x * xMuK);
-        this.velocity.addScaledVector(dir.z, -vel.z * zMuK);
+        const frameScale = dt * 60;
+        this.velocity.addScaledVector(dir.x, -vel.x * xMuK * frameScale);
+        this.velocity.addScaledVector(dir.z, -vel.z * zMuK * frameScale);
 
         const yAngularMuK = 0.2;
 
-        this.angularVelocity.addScaledVector(dir.y, -avel.y * yAngularMuK);
+        this.angularVelocity.addScaledVector(dir.y, -avel.y * yAngularMuK * frameScale);
     }
 
     updateKeys(keys) {

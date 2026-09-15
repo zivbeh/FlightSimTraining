@@ -3,6 +3,7 @@ import { soundManager } from './sound.js';
 import { obstacles } from './obstacle.js';
 import { CodeRunner } from './CodeRunner.js';
 import { DynamicBody } from './Body.js';
+import { createGameEvent } from './GameEvent.js';
 
 export class Aircraft extends DynamicBody {
     // Earth constants
@@ -31,19 +32,26 @@ export class Aircraft extends DynamicBody {
     restart() {
         super.restart();
         this.isCrashed = false;
+        this.wasAirborne = false;
+        this._runwayTouchdown = false;
         if (!this.codeRunner) return
         this.codeRunner.stop()
     }
+
+    isAirborne() {
+        const floorHeight = -this.groundOffset.y;
+        return this.position.y > floorHeight + 0.01
+    }
     
-    updateTime() {
+    updateTime(dt = 1 / 60) {
         if (!this.model) return
         this.calculateObservedInfo()
-        this.updateGravityAndGround()
-        this.updateMovement()
-        this.updateRotation()
+        this.updateGravityAndGround(dt)
+        this.updateMovement(dt)
+        this.updateRotation(dt)
 
-        this.updateAerodynamics()
-        this.updateAnimations()
+        this.updateAerodynamics(dt)
+        this.updateAnimations(dt)
         this.updateChecks()
         this.updateCodeRunner()
     }   
@@ -51,7 +59,7 @@ export class Aircraft extends DynamicBody {
     collisionCheck() {
         const checkpointID = 'r2';
         const obstacle = obstacles.find(o => o.id === checkpointID);
-        if (!obstacle) return false;
+        if (!obstacle || !obstacle.mesh?.parent || obstacle._destroyed) return false;
 
         const obsPos = obstacle.pos;
         const { w, h, thickness } = obstacle.size;
@@ -81,7 +89,7 @@ export class Aircraft extends DynamicBody {
         return inFull && !inInner;
     }
 
-    handleGroundCollision() {
+    handleGroundCollision(dt = 1 / 60) {
         const floorHeight = -this.groundOffset.y;
         // Only check for crash at the moment of impact (transitioning from air to ground)
         if (this.wasAirborne) {
@@ -124,7 +132,7 @@ export class Aircraft extends DynamicBody {
         return this.checkpointSystems.checkRunwayCollision(this.position, planeRadius);
     }
 
-    updateGravityAndGround() {
+    updateGravityAndGround(dt = 1 / 60) {
         const floorHeight = -this.groundOffset.y;
 
         const runwayCollision = this.checkRunwayLanding();
@@ -139,9 +147,20 @@ export class Aircraft extends DynamicBody {
                 this.position.y = runwayCollision.landingHeight;
                 this.velocity.y = 0;
                 this.wasAirborne = false;
+                if (!this._runwayTouchdown) {
+                    this.onGameEvent?.(createGameEvent('aircraft-landed', {
+                        source: this,
+                        sourceType: 'aircraft',
+                        subject: runwayCollision.runway.checkpoint,
+                        subjectType: 'runway',
+                        subjectId: runwayCollision.runway.checkpoint.config.id,
+                        position: runwayCollision.runway.checkpoint.position,
+                        data: { aircraft: this, runway: runwayCollision.runway },
+                    }));
+                }
                 this._runwayTouchdown = true;
                 if (typeof this.applyRunwayFriction === 'function') {
-                    this.applyRunwayFriction();
+                    this.applyRunwayFriction(dt);
                 }
                 return;
             }
@@ -156,19 +175,19 @@ export class Aircraft extends DynamicBody {
 
         if (this.position.y > floorHeight) {
             const gravityAccel = this.gravity;
-            this.velocity.y -= gravityAccel;
+            this.velocity.y -= gravityAccel * dt * 60;
             this.wasAirborne = true;
             this._runwayTouchdown = false;
 
         } else {
-            this.handleGroundCollision();
+            this.handleGroundCollision(dt);
         }
     }
 
 
-    updateAnimations() {
+    updateAnimations(dt = 1 / 60) {
         // Spawn smoke trail
-        this.updateTrail();
+        this.updateTrail(dt);
     }
 
     updateChecks() {
@@ -187,10 +206,7 @@ export class Aircraft extends DynamicBody {
     checkpointCheck() {
         const checkpointID = 'r2';
         const checkpoint = obstacles.find(o => o.id === checkpointID);
-        if (!checkpoint) {
-            console.warn(`Checkpoint with ID '${checkpointID}' not found.`);
-            return false;
-        }
+        if (!checkpoint || !checkpoint.mesh?.parent || checkpoint._destroyed) return false;
 
         // Get the current position and size of the checkpoint
         const checkpointPos = checkpoint.pos;
@@ -274,50 +290,52 @@ export class Aircraft extends DynamicBody {
         }
     }
 
-    updateAerodynamics() {
-        this.applyDrag()
+    updateAerodynamics(dt = 1 / 60) {
+        this.applyDrag(undefined, undefined, undefined, dt)
     }
 
     // dc = drag coefficient
     // adc = angular drag coefficient
     // adlc = angular drag from linear velocity coefficient
-    applyDrag(dc = [0.1,0.1,0.1], adc = [0.1,0.1,0.1], adlc = [[0,0,0],[0,0,0],[0,0,0]]) {
+    applyDrag(dc = [0.1,0.1,0.1], adc = [0.1,0.1,0.1], adlc = [[0,0,0],[0,0,0],[0,0,0]], dt = 1 / 60) {
         const dir = this.directions
         const vel = this.relativeVelocity
         const avel = this.relativeAngularVelocity
+        const frameScale = dt * 60
         
         const xDrag = -Math.sign(vel.x) * Math.pow(vel.x, 2) * dc[0];
         const yDrag = -Math.sign(vel.y) * Math.pow(vel.y, 2) * dc[1];
         const zDrag = -Math.sign(vel.z) * Math.pow(vel.z, 2) * dc[2];
 
         // add linear drag
-        this.velocity.addScaledVector(dir.x, xDrag);
-        this.velocity.addScaledVector(dir.y, yDrag);
-        this.velocity.addScaledVector(dir.z, zDrag);
+        this.velocity.addScaledVector(dir.x, xDrag * frameScale);
+        this.velocity.addScaledVector(dir.y, yDrag * frameScale);
+        this.velocity.addScaledVector(dir.z, zDrag * frameScale);
 
 
         // add angular drag from angular velocity
-        this.angularVelocity.addScaledVector(dir.x, -avel.x * adc[0]);
-        this.angularVelocity.addScaledVector(dir.y, -avel.y * adc[1]);
-        this.angularVelocity.addScaledVector(dir.z, -avel.z * adc[2]);
+        this.angularVelocity.addScaledVector(dir.x, -avel.x * adc[0] * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, -avel.y * adc[1] * frameScale);
+        this.angularVelocity.addScaledVector(dir.z, -avel.z * adc[2] * frameScale);
 
         // add angular drag from linear velocity
-        this.angularVelocity.addScaledVector(dir.x, xDrag * adlc[0][0]);
-        this.angularVelocity.addScaledVector(dir.x, yDrag * adlc[0][1]);
-        this.angularVelocity.addScaledVector(dir.x, zDrag * adlc[0][2]);
+        this.angularVelocity.addScaledVector(dir.x, xDrag * adlc[0][0] * frameScale);
+        this.angularVelocity.addScaledVector(dir.x, yDrag * adlc[0][1] * frameScale);
+        this.angularVelocity.addScaledVector(dir.x, zDrag * adlc[0][2] * frameScale);
 
-        this.angularVelocity.addScaledVector(dir.y, xDrag * adlc[1][0]);
-        this.angularVelocity.addScaledVector(dir.y, yDrag * adlc[1][1]);
-        this.angularVelocity.addScaledVector(dir.y, zDrag * adlc[1][2]);
+        this.angularVelocity.addScaledVector(dir.y, xDrag * adlc[1][0] * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, yDrag * adlc[1][1] * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, zDrag * adlc[1][2] * frameScale);
 
-        this.angularVelocity.addScaledVector(dir.z, xDrag * adlc[2][0]);
-        this.angularVelocity.addScaledVector(dir.z, yDrag * adlc[2][1]);
-        this.angularVelocity.addScaledVector(dir.z, zDrag * adlc[2][2]);
+        this.angularVelocity.addScaledVector(dir.z, xDrag * adlc[2][0] * frameScale);
+        this.angularVelocity.addScaledVector(dir.z, yDrag * adlc[2][1] * frameScale);
+        this.angularVelocity.addScaledVector(dir.z, zDrag * adlc[2][2] * frameScale);
     }
     
-    updateTrail() {
+    updateTrail(dt = 1 / 60) {
+        const frameScale = dt * 60;
         // Spawn new particles
-        this.trailCounter++;
+        this.trailCounter += frameScale;
         if (this.trailCounter > this.trailSpawnRate) {
             this.trailCounter = 0;
             this.spawnTrailParticle();
@@ -326,12 +344,12 @@ export class Aircraft extends DynamicBody {
         // Update existing particles
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
-            p.life -= 1;
+            p.life -= frameScale;
             p.mesh.material.opacity = p.life / p.maxLife;
-            p.mesh.position.y += 0.01; // float upward (for trail)
+            p.mesh.position.y += 0.01 * frameScale; // float upward (for trail)
             if (p.velocity) {
-                p.mesh.position.add(p.velocity); // for explosion
-                p.velocity.y -= 0.005; // gravity on explosion particles
+                p.mesh.position.addScaledVector(p.velocity, frameScale); // for explosion
+                p.velocity.y -= 0.005 * frameScale; // gravity on explosion particles
             }
             
             if (p.life <= 0) {
@@ -363,6 +381,10 @@ export class Aircraft extends DynamicBody {
     }
 
     updateInfo() {
+        // Internal velocities retain the legacy metres-per-60-Hz-tick units so
+        // the tuned physics remains unchanged. Public telemetry is SI (m/s).
+        const METERS_PER_SECOND = 60;
+        const DEGREES_PER_SECOND = 60 * (180 / Math.PI);
         const info = {
             position: {
                 x: parseFloat(this.position.x.toFixed(2)),
@@ -375,19 +397,19 @@ export class Aircraft extends DynamicBody {
                 z: parseFloat((this.rotation.z * (180 / Math.PI)).toFixed(2))
             },
             velocity: {
-                x: parseFloat(this.velocity.x.toFixed(2)),
-                y: parseFloat(this.velocity.y.toFixed(2)),
-                z: parseFloat(this.velocity.z.toFixed(2))
+                x: parseFloat((this.velocity.x * METERS_PER_SECOND).toFixed(2)),
+                y: parseFloat((this.velocity.y * METERS_PER_SECOND).toFixed(2)),
+                z: parseFloat((this.velocity.z * METERS_PER_SECOND).toFixed(2))
             },
             angular_velocity: {
-                x: parseFloat(this.relativeAngularVelocity.x.toFixed(2)),
-                y: parseFloat(this.relativeAngularVelocity.y.toFixed(2)),
-                z: parseFloat(this.relativeAngularVelocity.z.toFixed(2))
+                x: parseFloat((this.relativeAngularVelocity.x * DEGREES_PER_SECOND).toFixed(2)),
+                y: parseFloat((this.relativeAngularVelocity.y * DEGREES_PER_SECOND).toFixed(2)),
+                z: parseFloat((this.relativeAngularVelocity.z * DEGREES_PER_SECOND).toFixed(2))
             },
             air_speed: {
-                x: parseFloat(this.relativeVelocity.x.toFixed(2)),
-                y: parseFloat(this.relativeVelocity.y.toFixed(2)),
-                z: parseFloat(this.relativeVelocity.z.toFixed(2))
+                x: parseFloat((this.relativeVelocity.x * METERS_PER_SECOND).toFixed(2)),
+                y: parseFloat((this.relativeVelocity.y * METERS_PER_SECOND).toFixed(2)),
+                z: parseFloat((this.relativeVelocity.z * METERS_PER_SECOND).toFixed(2))
             },
             controls: this.controls
         };

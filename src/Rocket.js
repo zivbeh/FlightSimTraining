@@ -13,7 +13,7 @@ export class Rocket extends Aircraft {
         const startPoint = new THREE.Vector3(0, 0, 0);
         const endPoint = new THREE.Vector3(0, 0, 0);
         this.arrowCombined = this.createArrow(startPoint, endPoint, 0xffff00);
-        this.loadModel("../assets/missile1.glb")
+        this.loadModel("./assets/missile1.glb")
         this.restart()
     }
 
@@ -53,17 +53,18 @@ export class Rocket extends Aircraft {
         this.controls = {throttle: 0, fin1: 0, fin2: 0, fin3: 0, fin4: 0};
     }
 
-    updateTime() {
-        super.updateTime()
+    updateTime(dt = 1 / 60) {
+        super.updateTime(dt)
         // this.visualizeArrows()
     }
     
-    updateAerodynamics() {
+    updateAerodynamics(dt = 1 / 60) {
+        const frameScale = dt * 60;
         const dc = [0.07, 0.004, 0.07]
         const adc = [0.07, 0.02, 0.07]
         const adlc = [[0, 0, -0.5], [0, 0, 0], [0.5, 0, 0]];
-        this.applyDrag(dc, adc, adlc)
-        this.applyThrust()
+        this.applyDrag(dc, adc, adlc, dt)
+        this.applyThrust(dt)
 
         const dir = this.directions
         const vel = this.relativeVelocity
@@ -72,32 +73,33 @@ export class Rocket extends Aircraft {
 
         // fin number is like a clock order
         // add angular drag from controls
-        this.angularVelocity.addScaledVector(dir.x, zDrag * this.controls.fin2 * 0.1);
-        this.angularVelocity.addScaledVector(dir.x, zDrag * this.controls.fin4 * -0.1);
-        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin1 * 0.1);
-        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin2 * 0.1);
-        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin3 * 0.1);
-        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin4 * 0.1);
-        this.angularVelocity.addScaledVector(dir.z, zDrag * this.controls.fin1 * -0.1);
-        this.angularVelocity.addScaledVector(dir.z, zDrag * this.controls.fin3 * 0.1);
+        this.angularVelocity.addScaledVector(dir.x, zDrag * this.controls.fin2 * 0.1 * frameScale);
+        this.angularVelocity.addScaledVector(dir.x, zDrag * this.controls.fin4 * -0.1 * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin1 * 0.1 * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin2 * 0.1 * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin3 * 0.1 * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin4 * 0.1 * frameScale);
+        this.angularVelocity.addScaledVector(dir.z, zDrag * this.controls.fin1 * -0.1 * frameScale);
+        this.angularVelocity.addScaledVector(dir.z, zDrag * this.controls.fin3 * 0.1 * frameScale);
     }
     
-    applyThrust() {
+    applyThrust(dt = 1 / 60) {
         if (!this.model) return;
         if (this.isCrashed) return
 
         const forward = this.directions.y;
-        const massDisplacementRate = this.controls.throttle * 0.03
-        if (this.fuel < massDisplacementRate) return
-        this.fuel -= massDisplacementRate
-        this.mass -= massDisplacementRate
+        const frameScale = dt * 60;
+        const massDisplacement = this.controls.throttle * 0.03 * frameScale
+        if (this.fuel < massDisplacement) return
+        this.fuel -= massDisplacement
+        this.mass -= massDisplacement
         const effectiveExhaustVelocity = 200
-        const thrustForce = massDisplacementRate * effectiveExhaustVelocity;
+        const thrustForce = this.controls.throttle * 0.03 * effectiveExhaustVelocity;
         const thrustAcc = thrustForce / this.mass
-        this.velocity.addScaledVector(forward, thrustAcc);
+        this.velocity.addScaledVector(forward, thrustAcc * frameScale);
     }
 
-    handleGroundCollision() {
+    handleGroundCollision(dt = 1 / 60) {
         const floorHeight = -this.groundOffset.y;
         // Only check for crash at the moment of impact (transitioning from air to ground)
         if (this.wasAirborne) {
@@ -125,10 +127,10 @@ export class Rocket extends Aircraft {
         this.setRotationX(0)
         
 
-        this.applyGroundFriction()
+        this.applyGroundFriction(dt)
     }
     
-    applyGroundFriction() {
+    applyGroundFriction(dt = 1 / 60) {
         const dir = this.directions
         const vel = this.relativeVelocity
         const avel = this.relativeAngularVelocity
@@ -136,12 +138,13 @@ export class Rocket extends Aircraft {
         const zMuK = 0.2;
         const xMuK = 0.2;
 
-        this.velocity.addScaledVector(dir.x, -vel.x * xMuK);
-        this.velocity.addScaledVector(dir.z, -vel.z * zMuK);
+        const frameScale = dt * 60;
+        this.velocity.addScaledVector(dir.x, -vel.x * xMuK * frameScale);
+        this.velocity.addScaledVector(dir.z, -vel.z * zMuK * frameScale);
 
         const yAngularMuK = 0.2;
 
-        this.angularVelocity.addScaledVector(dir.y, -avel.y * yAngularMuK);
+        this.angularVelocity.addScaledVector(dir.y, -avel.y * yAngularMuK * frameScale);
     }
 
     spawnExplosion() {

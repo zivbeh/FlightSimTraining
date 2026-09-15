@@ -1,6 +1,15 @@
 import * as THREE from 'three';
 import { obstacles } from './obstacle.js';
 
+// Every projectile has the same appearance. Sharing these resources avoids
+// compiling and retaining a new pair of GPU geometries/materials per shot.
+const BULLET_LENGTH = 0.4;
+const BULLET_RADIUS = 0.05;
+const BULLET_BODY_GEOMETRY = new THREE.CylinderGeometry(BULLET_RADIUS, BULLET_RADIUS, BULLET_LENGTH, 8, 1);
+const BULLET_BODY_MATERIAL = new THREE.MeshStandardMaterial({ color: 0xbdbdbd, metalness: 0.9, roughness: 0.25 });
+const BULLET_TIP_GEOMETRY = new THREE.SphereGeometry(BULLET_RADIUS * 0.9, 8, 6);
+const BULLET_TIP_MATERIAL = new THREE.MeshBasicMaterial({ color: 0xffd88a });
+
 export default class Bullet {
   constructor(scene, opts = {}) {
     this.basePos = opts.pos.clone();
@@ -14,18 +23,12 @@ export default class Bullet {
     this.scene = scene;
 
     // Create a small metallic projectile (elongated cylinder) with an emissive tip
-    const length = 0.4;
-    const radius = 0.05;
-    const cylGeo = new THREE.CylinderGeometry(radius, radius, length, 8, 1);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xbdbdbd, metalness: 0.9, roughness: 0.25 });
-    const cyl = new THREE.Mesh(cylGeo, mat);
+    const cyl = new THREE.Mesh(BULLET_BODY_GEOMETRY, BULLET_BODY_MATERIAL);
     // Cylinder geometry in Three is along the Y axis; we'll align it to direction later
 
     // Emissive tip for visual brightness
-    const tipGeo = new THREE.SphereGeometry(radius * 0.9, 8, 6);
-    const tipMat = new THREE.MeshBasicMaterial({ color: 0xffd88a });
-    const tip = new THREE.Mesh(tipGeo, tipMat);
-    tip.position.set(0, length / 2, 0);
+    const tip = new THREE.Mesh(BULLET_TIP_GEOMETRY, BULLET_TIP_MATERIAL);
+    tip.position.set(0, BULLET_LENGTH / 2, 0);
 
     // Group them so we can orient the projectile as one object
     const group = new THREE.Group();
@@ -44,7 +47,7 @@ export default class Bullet {
     scene.add(group);
   }
 
-  update() {
+  update(dt = 1 / 60) {
     if (!this.active) {
       if (this.mesh && this.mesh.parent) {
         try { this.mesh.parent.remove(this.mesh); } catch (e) {}
@@ -53,13 +56,14 @@ export default class Bullet {
     }
 
     // Move along direction
-    this.pos.x += this.speed * this.dir.x;
-    this.pos.y += this.speed * this.dir.y;
-    this.pos.z += this.speed * this.dir.z;
+    const frameScale = dt * 60;
+    this.pos.x += this.speed * this.dir.x * frameScale;
+    this.pos.y += this.speed * this.dir.y * frameScale;
+    this.pos.z += this.speed * this.dir.z * frameScale;
     this.mesh.position.copy(this.pos);
 
     // lifetime
-    this.life -= 1;
+    this.life -= frameScale;
     if (this.life <= 0) {
       this.active = false;
       if (this.mesh && this.mesh.parent) try { this.mesh.parent.remove(this.mesh); } catch (e) {}
@@ -74,14 +78,12 @@ export default class Bullet {
       const dx = this.pos.x - op.x;
       const dy = this.pos.y - op.y;
       const dz = this.pos.z - op.z;
-      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const distanceSquared = dx * dx + dy * dy + dz * dz;
       let radius = 1.0;
       if (o.size && typeof o.size.r === 'number') radius = o.size.r;
-      else {
-        const bbox = new THREE.Box3().setFromObject(o.mesh);
-        radius = bbox.getSize(new THREE.Vector3()).length() / 2;
-      }
-      if (dist < Math.max(0.5, radius + 0.05)) {
+      else if (o._boundsSize) radius = o._boundsSize.length() / 2;
+      const hitRadius = Math.max(0.5, radius + BULLET_RADIUS);
+      if (distanceSquared < hitRadius * hitRadius) {
         // hit
         try {
           const price = (typeof o.price === 'number') ? o.price : (o.health ? Math.floor(o.health/3) : 0);
@@ -98,5 +100,12 @@ export default class Bullet {
         break;
       }
     }
+  }
+
+  dispose() {
+    this.active = false;
+    if (this.mesh && this.mesh.parent) this.mesh.parent.remove(this.mesh);
+    this.mesh = null;
+    this._parts = null;
   }
 }

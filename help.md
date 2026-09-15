@@ -1,6 +1,7 @@
 ## How to play
 - Use the keyboard to steer and throttle the airplane.
 - The fuel bar shows your remaining fuel.
+- The Air Time Score awards one point for every completed second while airborne.
 - Collect fuel pickups to refill your tank.
 - Reach checkpoints and land safely to earn rewards.
 
@@ -25,7 +26,6 @@
 - setAileronRight(angle): adjust the right aileron input
 - setElevatorLeft(angle): adjust the left elevator input
 - setElevatorRight(angle): adjust the right elevator input
-- setFlaps(angle): adjust the flap input
 - setSteeringWheel(angle): adjust the steering wheel input
 - setThrottle(value): adjust the throttle level (value range is from 0 to 1)
 - shoot(): fire a projectile from the airplane

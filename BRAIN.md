@@ -76,3 +76,4 @@ This project is a browser-based 3D flight game inspired by the feel of Getting O
 - Preserve the existing game feel while improving clarity, reliability, or polish.
 - When changing gameplay systems, verify that checkpoints, fuel, restart behavior, and upgrades still work together.
 - When editing UI or interaction logic, ensure the editor, upgrades modal, and game controls remain coherent.
+- When creating new 3d object in the game with a class, make that class inherit from Body class, but only if it makes sense

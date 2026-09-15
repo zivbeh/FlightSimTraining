@@ -23,6 +23,7 @@
 
     <div class="container">
         <div id="viewport">
+          <div class="viewport-content">
             <canvas id="bg" class="canvas"></canvas>
             <div class="top-right-buttons">
                 <button id="restartBtn" onclick="this.blur();">Restart</button>
@@ -35,6 +36,8 @@
                         <button type="button" role="menuitemradio" data-game-mode="plane">Plane</button>
                         <button type="button" role="menuitemradio" data-game-mode="quadcopter">Quadcopter</button>
                         <button type="button" role="menuitemradio" data-game-mode="rocket">Rocket</button>
+                        <div class="menu-separator" role="separator"></div>
+                        <button id="open-levels-btn" type="button" role="menuitem">Levels</button>
                         <div class="menu-separator" role="separator"></div>
                         <button id="demo-codes-btn" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false">
                             <span>Demo Codes</span><span class="menu-arrow">›</span>
@@ -53,22 +56,22 @@
                 <div class="attitude-title">ATTITUDE</div>
                 <canvas id="attitude-canvas"></canvas>
                 <div class="attitude-values">
-                    <span>PITCH <strong id="attitude-pitch">0&deg;</strong></span>
-                    <span>ROLL <strong id="attitude-roll">0&deg;</strong></span>
                     <span>ALT <strong id="attitude-altitude">0 m</strong></span>
-                    <span>FWD SPD <strong id="attitude-airspeed">0.00 m/s</strong></span>
+                    <span>SPEED <strong id="attitude-airspeed">0.00 m/s</strong></span>
                 </div>
             </div>
             <!-- HUD: first row and second row indicator -->
             <div id="hud">
                 <div id="hud-row1">
                     <div id="hud-money">$ <span id="hud-money-count">0</span></div>
-                    <div id="hud-score">Score: <span id="hud-score-count">0</span></div>
+                    <div id="hud-score" title="One point per second while airborne">Score: <span id="hud-score-count">0</span></div>
                     <div id="hud-bullets">In-Flight: <span id="hud-bullets-count">0</span></div>
                     <div id="hud-ammo">Ammo: <span id="hud-ammo-count">0</span></div>
                     <div id="hud-targets">Targets: <span id="hud-targets-count">0</span></div>
                 </div>
                 <div id="hud-row2">
+                    <div id="hud-level">Level <span id="hud-level-number">1</span>: <span id="hud-level-name">First Landing</span></div>
+                    <div id="hud-objective">Objective: <span id="hud-objective-text">Land on Airport 1</span> <strong id="hud-objective-progress">0/1</strong></div>
                     <div id="hud-next-strip">Next Strip: <span id="hud-next-strip-info">Searching...</span></div>
                 </div>
             </div>
@@ -80,6 +83,7 @@
                 </div>
                 <div id="fuel-count"><span id="fuel-count-num">0</span>/<span id="fuel-capacity-num">0</span></div>
             </div>
+          </div>
         </div>
 
         <div id="splitter" aria-label="Resize panel" role="separator"></div>
@@ -126,6 +130,32 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- Level Complete Modal -->
+    <div id="level-complete-modal" class="modal" aria-hidden="true">
+        <div class="modal-backdrop"></div>
+        <div class="modal-panel level-complete-panel" role="dialog" aria-modal="true" aria-labelledby="level-complete-title">
+            <div class="modal-body level-complete-body">
+                <div class="level-complete-trophy" aria-hidden="true">★</div>
+                <div class="level-complete-kicker">MISSION ACCOMPLISHED</div>
+                <h2 id="level-complete-title">Level Complete!</h2>
+                <p id="level-complete-message"></p>
+                <button id="next-level-btn" type="button">Choose Next Level</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Level Selection Modal -->
+    <div id="levels-modal" class="modal" aria-hidden="true">
+        <div id="levels-backdrop" class="modal-backdrop"></div>
+        <div class="modal-panel levels-panel" role="dialog" aria-modal="true" aria-labelledby="levels-title">
+            <div class="modal-header">
+                <h2 id="levels-title">Select Level</h2>
+                <button id="levels-close" class="modal-close" type="button" aria-label="Close level selection">✕</button>
+            </div>
+            <div id="levels-grid" class="levels-grid"></div>
         </div>
     </div>
 

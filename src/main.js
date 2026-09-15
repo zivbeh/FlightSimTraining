@@ -7,13 +7,12 @@ import * as Obstacle from './obstacle.js';
 import { soundManager } from './sound.js';
 import Upgrades from './upgrades.js';
 import { UPGRADE_DEFINITIONS } from './upgradesData.js';
-import { Waypoint } from './Waypoint.js';
 import { Rocket } from './Rocket.js';
-import { createCheckpointSystems } from './systems/checkpoints.js';
-import { Item } from './Item.js';
 import { Drone } from './Drone.js';
 import { InputController } from './InputController.js';
-import { ThirdPersonCamera } from './Camera.js';
+import { Camera } from './Camera.js';
+
+import { Levels } from './Levels.js';
 
 
 // This creates a robust absolute URL pointing to your text asset
@@ -48,82 +47,9 @@ let myAircraft = airplane;
 let activeGameMode = 'plane';
 const aircraftByMode = { plane: airplane, quadcopter: drone, rocket };
 
-const item = new Item({
-    position: new THREE.Vector3(20, 4, 30),
-    radius: 12,
-    color: 0x8a2be2,
-    activeColor: 0xffd54f,
-    onEnter: () => {
-        if (myAircraft && typeof myAircraft.fuel === 'number' && typeof myAircraft.fuelCapacity === 'number') {
-            myAircraft.fuel = myAircraft.fuelCapacity;
-        }
-    }
-});
-item.addToScene(world.scene);
-
 const controls = new OrbitControls(world.camera, world.renderer.domElement);
-
-// Runway checkpoints control landing, rewards, and respawning.
-const checkpointConfig = [
-    {
-        id: 'runway-1',
-        position: { x: 0, y: 50, z: 300 },
-        reward: { fuel: 100, money: 50 },
-        triggerRadius: 24
-    },
-    {
-        id: 'runway-2',
-        position: { x: 100, y: 700, z: 300 },
-        reward: { fuel: 100, money: 50 },
-        triggerRadius: 24
-    }
-];
-
-// Waypoints are independent flight markers and do not affect runway respawning.
-const waypointConfig = [
-    { id: 'waypoint-1', position: { x: 0, y: 0, z: 80 }, radius: 6, height: 10 },
-    { id: 'waypoint-2', position: { x: 60, y: 40, z: 200 }, radius: 6, height: 20 },
-    { id: 'waypoint-3', position: { x: 160, y: 80, z: 200 }, radius: 6, height: 20 },
-    { id: 'waypoint-4', position: { x: 160, y: 100, z: 0 }, radius: 6, height: 20 },
-    { id: 'waypoint-5', position: { x: 0, y: 200, z: 0 }, radius: 6, height: 20 },
-];
-
-const waypoints = waypointConfig.map((config) => {
-    const waypoint = new Waypoint(world, {
-        radius: config.radius,
-        height: config.height,
-        color: config.color ?? 0xff0000,
-        opacity: config.opacity ?? 0.25
-    });
-    waypoint.id = config.id;
-    waypoint.setPosition(config.position.x, config.position.y, config.position.z);
-    return waypoint;
-});
-const checkpointState = { lastCheckpoint: null };
-
-const checkpointSystems = createCheckpointSystems({
-    world,
-    checkpointConfigs: checkpointConfig,
-    airplane,
-    showBanner: (message) => {
-        if (checkpointBanner) {
-            checkpointBanner.textContent = message;
-            checkpointBanner.style.display = 'block';
-            checkpointBanner.style.opacity = '1';
-            if (checkpointBannerTimer) clearTimeout(checkpointBannerTimer);
-            checkpointBannerTimer = window.setTimeout(() => {
-                checkpointBanner.style.opacity = '0';
-                window.setTimeout(() => {
-                    checkpointBanner.style.display = 'none';
-                }, 260);
-            }, 2400);
-        }
-    }
-});
-checkpointSystems.build();
-
-// Give airplane access to runway collision system
-airplane.checkpointSystems = checkpointSystems;
+// ThirdPersonCamera owns wheel zoom so its configured follow distance persists.
+controls.enableZoom = false;
 
 const checkpointBanner = document.createElement('div');
 checkpointBanner.id = 'checkpoint-banner';
@@ -148,20 +74,117 @@ checkpointBanner.style.display = 'none';
 document.body.appendChild(checkpointBanner);
 let checkpointBannerTimer = null;
 
+const levelsModal = document.getElementById('levels-modal');
+const levelsGrid = document.getElementById('levels-grid');
+const levelsBackdrop = document.getElementById('levels-backdrop');
+const levelsClose = document.getElementById('levels-close');
+const openLevelsButton = document.getElementById('open-levels-btn');
+const levelCompleteModal = document.getElementById('level-complete-modal');
+const levelCompleteMessage = document.getElementById('level-complete-message');
+const nextLevelButton = document.getElementById('next-level-btn');
+let levelCompleteTimer = null;
+
+function suspendFlightControls() {
+    inputController.keys.clear();
+    myAircraft.resetControls?.();
+}
+
+function isPopupOpen() {
+    return Boolean(document.querySelector('.modal[aria-hidden="false"]'));
+}
+
+function showLevelComplete({ level, nextLevel }) {
+    if (levelCompleteTimer) clearTimeout(levelCompleteTimer);
+    levelCompleteTimer = window.setTimeout(() => {
+        levelCompleteTimer = null;
+        levelCompleteMessage.textContent = nextLevel
+            ? `Congratulations! You completed ${level.name}. You can now choose your next level.`
+            : `Congratulations! You completed ${level.name} and every available level.`;
+        nextLevelButton.textContent = nextLevel ? 'Choose Next Level' : 'View Levels';
+        levelCompleteModal.setAttribute('aria-hidden', 'false');
+        suspendFlightControls();
+        nextLevelButton.focus();
+    }, 1500);
+}
+
+function renderLevelsGrid() {
+    levelsGrid.replaceChildren();
+    levels.getLevelSummaries().forEach((level) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'level-card';
+        card.classList.toggle('completed', level.completed);
+        card.classList.toggle('current', level.current);
+        card.disabled = !level.unlocked;
+
+        const status = !level.unlocked ? 'Locked' : level.completed ? 'Completed ✓' : level.current ? 'Current Level' : 'Unlocked';
+        card.innerHTML = `
+            <span class="level-card-number">Level ${level.id}</span>
+            <span class="level-card-name"></span>
+            <span class="level-card-objective"></span>
+            <span class="level-card-status">${status}</span>`;
+        card.querySelector('.level-card-name').textContent = level.name;
+        card.querySelector('.level-card-objective').textContent = level.objective;
+        card.addEventListener('click', () => {
+            selectLevel(level.id);
+            levelsModal.setAttribute('aria-hidden', 'true');
+        });
+        levelsGrid.appendChild(card);
+    });
+}
+
+function openLevelsModal() {
+    renderLevelsGrid();
+    levelsModal.setAttribute('aria-hidden', 'false');
+    suspendFlightControls();
+}
+
+function closeLevelsModal() {
+    levelsModal.setAttribute('aria-hidden', 'true');
+}
+
+const levels = new Levels({
+    world,
+    airplane,
+    onLevelComplete: showLevelComplete,
+    showBanner: (message) => {
+        checkpointBanner.textContent = message;
+        checkpointBanner.style.display = 'block';
+        checkpointBanner.style.opacity = '1';
+        if (checkpointBannerTimer) clearTimeout(checkpointBannerTimer);
+        checkpointBannerTimer = window.setTimeout(() => {
+            checkpointBanner.style.opacity = '0';
+            window.setTimeout(() => {
+                checkpointBanner.style.display = 'none';
+            }, 260);
+        }, 2400);
+    },
+});
+levels.loadLevel(1);
+
+nextLevelButton?.addEventListener('click', () => {
+    levelCompleteModal.setAttribute('aria-hidden', 'true');
+    openLevelsModal();
+});
+openLevelsButton?.addEventListener('click', openLevelsModal);
+levelsBackdrop?.addEventListener('click', closeLevelsModal);
+levelsClose?.addEventListener('click', closeLevelsModal);
+window.levels = levels;
+
 function respawnAtCheckpoint(targetCheckpoint = null) {
-    checkpointSystems.respawnAtCheckpoint(targetCheckpoint);
+    levels.checkpointSystems?.respawnAtCheckpoint(targetCheckpoint);
 }
 
 // Game state: money, score, flight time
 window.gameState = {
+    level: levels.currentLevelNumber,
+    objective: levels.getObjective(),
     money: 500,
     score: 0,
     flightTime: 0,
     addMoney(amount) { this.money = Math.max(0, Math.floor(this.money + (amount||0))); },
     addScore(v) { this.score = Math.max(0, Math.floor(this.score + (v||0))); }
 };
-
-Obstacle.initObstacles(world.scene);
 
 // --- 2. Instantiate CodeEditor ---
 const codeEditor = new CodeEditor(myAircraft, initialCode);
@@ -362,7 +385,7 @@ if (helpClose) helpClose.addEventListener('click', closeHelpModal);
 const restartBtn = document.getElementById('restartBtn');
 if (restartBtn) {
     restartBtn.addEventListener('click', () => {
-        myAircraft.restart();
+        levels.resetCurrentLevel();
         if (window.gameState) {
             window.gameState.flightTime = 0;
             window.gameState.score = 0;
@@ -440,7 +463,7 @@ function selectGameMode(mode) {
     myAircraft = nextAircraft;
     activeGameMode = mode;
     myAircraft.restart();
-    thirdPersonCamera.body = myAircraft;
+    camera.body = myAircraft;
     if (codeEditor.runner !== myAircraft.codeRunner) {
         codeEditor.runner.stop();
         const editorCallbacks = codeEditor.runner.callbacks;
@@ -461,6 +484,26 @@ function selectGameMode(mode) {
     if (window.gameState) {
         window.gameState.flightTime = 0;
         window.gameState.score = 0;
+    }
+}
+
+function selectLevel(levelNumber) {
+    try {
+        if (!levels.isLevelUnlocked(levelNumber)) return;
+        if (levelCompleteTimer) {
+            clearTimeout(levelCompleteTimer);
+            levelCompleteTimer = null;
+        }
+        levelCompleteModal.setAttribute('aria-hidden', 'true');
+        levels.loadLevel(Number(levelNumber));
+        closeGameMenus();
+        closeLevelsModal();
+        if (window.gameState) {
+            window.gameState.flightTime = 0;
+            window.gameState.score = 0;
+        }
+    } catch (error) {
+        console.error(error);
     }
 }
 
@@ -485,7 +528,7 @@ if (mainMenuBtn && mainMenu) {
     gameModeOptions.forEach((option) => {
         option.addEventListener('click', () => selectGameMode(option.dataset.gameMode));
     });
-    [openUpgradesBtnViewport, helpBtnViewport].forEach((option) => {
+    [openLevelsButton, openUpgradesBtnViewport, helpBtnViewport].forEach((option) => {
         option?.addEventListener('click', () => {
             mainMenu.hidden = true;
             mainMenuBtn.setAttribute('aria-expanded', 'false');
@@ -504,8 +547,8 @@ if (mainMenuBtn && mainMenu) {
 const splitter = document.getElementById('splitter');
 const rightPanel = document.getElementById('right-panel');
 let isResizing = false;
-const MIN_RIGHT_PANEL_WIDTH = 280;
-const MIN_VIEWPORT_WIDTH = 320;
+const MIN_RIGHT_PANEL_WIDTH = 0;
+const MIN_VIEWPORT_WIDTH = 0;
 
 if (splitter && rightPanel) {
     splitter.addEventListener('mousedown', (event) => {
@@ -521,12 +564,7 @@ if (splitter && rightPanel) {
         const newWidth = Math.min(Math.max(MIN_RIGHT_PANEL_WIDTH, window.innerWidth - event.clientX), available);
         rightPanel.style.width = `${newWidth}px`;
 
-        const viewport = document.getElementById('viewport');
-        if (viewport) {
-            world.resize(viewport.clientWidth, viewport.clientHeight);
-        } else {
-            world.resize();
-        }
+        world.resize();
     });
 
     window.addEventListener('mouseup', () => {
@@ -534,12 +572,7 @@ if (splitter && rightPanel) {
         isResizing = false;
         document.body.style.cursor = '';
 
-        const viewport = document.getElementById('viewport');
-        if (viewport) {
-            world.resize(viewport.clientWidth, viewport.clientHeight);
-        } else {
-            world.resize();
-        }
+        world.resize();
     });
 }
 
@@ -548,8 +581,14 @@ if (splitter && rightPanel) {
 
 
 const inputController = new InputController(world.canvas);
-const thirdPersonCamera = new ThirdPersonCamera(world.camera, myAircraft, inputController);
+const camera = new Camera(world.camera, myAircraft, inputController, controls);
+world.canvas.addEventListener('keydown', (event) => {
+    if (event.key.toLowerCase() === 'c' && !event.repeat) {
+        camera.toggleMode();
+    }
+});
 selectGameMode('plane');
+
 
 // Resume audio on first user interaction (required by some browsers)
 function resumeAudioOnGesture() {
@@ -566,6 +605,10 @@ window.addEventListener('keydown', resumeAudioOnGesture);
 
 
 const domHUD = {
+    levelNumber: document.getElementById('hud-level-number'),
+    levelName: document.getElementById('hud-level-name'),
+    objectiveText: document.getElementById('hud-objective-text'),
+    objectiveProgress: document.getElementById('hud-objective-progress'),
     nextStripInfo: document.getElementById('hud-next-strip-info'),
     bulletsCount: document.getElementById('hud-bullets-count'),
     ammoCount: document.getElementById('hud-ammo-count'),
@@ -581,10 +624,10 @@ let hudFrameCounter = 0;
 let lastShadowAltitudeRange = -1;
 
 function getNextLandingStrip() {
-    const stations = checkpointSystems.checkpoints;
+    const stations = levels.checkpointSystems?.checkpoints ?? [];
     if (stations.length === 0) return null;
 
-    const lastId = checkpointState.lastCheckpoint?.config?.id;
+    const lastId = levels.checkpointState.lastCheckpoint?.config?.id;
     const currentIndex = stations.findIndex(cp => cp.config.id === lastId);
     if (currentIndex >= 0 && currentIndex < stations.length - 1) {
         return stations[currentIndex + 1];
@@ -615,8 +658,6 @@ function updateLandingStripHUD() {
 }
 
 const attitudeCanvas = document.getElementById('attitude-canvas');
-const attitudePitchValue = document.getElementById('attitude-pitch');
-const attitudeRollValue = document.getElementById('attitude-roll');
 const attitudeAltitudeValue = document.getElementById('attitude-altitude');
 const attitudeAirspeedValue = document.getElementById('attitude-airspeed');
 const attitudeContext = attitudeCanvas?.getContext('2d');
@@ -724,38 +765,54 @@ function drawAttitudeIndicator(aircraft) {
     ctx.stroke();
     ctx.restore();
 
-    if (attitudePitchValue) attitudePitchValue.textContent = `${Math.round(THREE.MathUtils.radToDeg(pitch))}\u00B0`;
-    if (attitudeRollValue) attitudeRollValue.textContent = `${Math.round(THREE.MathUtils.radToDeg(roll))}\u00B0`;
-    if (attitudeAltitudeValue) attitudeAltitudeValue.textContent = `${Math.round(Math.max(aircraft.position.y, 0))} m`;
-    if (attitudeAirspeedValue) attitudeAirspeedValue.textContent = `${aircraft.relativeVelocity.z.toFixed(2)} m/s`;
+    if (attitudeAltitudeValue) attitudeAltitudeValue.textContent = `${Math.floor(Math.max(aircraft.position.y, 0))} m`;
+    if (attitudeAirspeedValue) attitudeAirspeedValue.textContent = `${Math.ceil(aircraft.velocity.length() * 60)} m/s`;
 }
 
-function animate() {
+// Physics was originally tuned around 60 updates per second. Keep that exact
+// simulation rate, while allowing rendering to run at any rate, by consuming
+// real elapsed time in fixed-size steps. This also makes the nonlinear drag
+// and collision calculations deterministic across machines.
+const SIMULATION_STEP = 1 / 60;
+const MAX_FRAME_DELTA = 0.25;
+const SCORE_PER_AIRBORNE_SECOND = 1;
+let hudElapsed = 0;
+
+function animate(now = performance.now()) {
     syncAircraftVisibility();
-    item.update(myAircraft.position);
-    const now = performance.now();
     requestAnimationFrame(animate);
-    if (!animate._last) animate._last = now;
-    const dt = (now - animate._last) / 1000; // seconds
+    if (animate._last === undefined) animate._last = now;
+    let dt = Math.min(MAX_FRAME_DELTA, Math.max(0, (now - animate._last) / 1000));
     animate._last = now;
+    hudElapsed += dt;
 
-    // Increment frame counter for throttled UI updates
-    hudFrameCounter++;
-
-    // Update Logic
-    myAircraft.updateKeys(inputController.keys);
-    myAircraft.updateTime();
-    // airplane2.updateTime();
-    Obstacle.updateObstacles();
-
-    // Update waypoint collision status and remember the latest checkpoint reached.
+    // Read input once per rendered frame, then advance as many deterministic
+    // physics steps as the elapsed wall-clock time requires.
+    if (isPopupOpen()) {
+        suspendFlightControls();
+    } else {
+        myAircraft.updateKeys(inputController.keys);
+    }
+    myAircraft.updateTime(dt);
     if (activeGameMode === 'plane') {
-        checkpointSystems.update(airplane.position, checkpointState);
-        waypoints.forEach((waypoint) => waypoint.update(airplane.position));
+        levels.updateLevelActors(dt);
+        levels.updateEventSources(airplane.position, dt);
+    }
+    Obstacle.updateObstacles(now, dt);
+
+    if (window.gameState) {
+        const isAirborne = myAircraft.isAirborne();
+        if (isAirborne) window.gameState.flightTime += dt;
+        // Score measures sustained flight and grows predictably: one point for
+        // each completed second in the air.
+        window.gameState.score = Math.floor(
+            window.gameState.flightTime * SCORE_PER_AIRBORNE_SECOND
+        );
     }
 
-    // Throttled HUD updates (Runs roughly 10 times per second instead of 60)
-    if (hudFrameCounter % 6 === 0) {
+    // Update the HUD by elapsed time, not by an assumed number of frames.
+    if (hudElapsed >= 0.1) {
+        hudElapsed %= 0.1;
         try {
             const bulletsActive = myAircraft.bullets ? myAircraft.bullets.filter(b => b && b.active).length : 0;
             if (domHUD.bulletsCount) domHUD.bulletsCount.textContent = String(bulletsActive);
@@ -772,10 +829,18 @@ function animate() {
             }
             
             if (window.gameState) {
-                const isAirborne = myAircraft.position.y > 1;
-                if (isAirborne) window.gameState.flightTime += (dt * 6); // Account for the 6 skipped frames
-                window.gameState.score = Math.floor(Math.pow(1.2, window.gameState.flightTime));
                 if (domHUD.scoreCount) domHUD.scoreCount.textContent = String(window.gameState.score);
+            }
+
+            const activeLevel = levels.currentLevel;
+            const objective = levels.getObjective();
+            if (domHUD.levelNumber) domHUD.levelNumber.textContent = String(levels.currentLevelNumber ?? '-');
+            if (domHUD.levelName) domHUD.levelName.textContent = activeLevel?.name ?? 'Unavailable';
+            if (domHUD.objectiveText) domHUD.objectiveText.textContent = objective?.description ?? 'None';
+            if (domHUD.objectiveProgress) {
+                domHUD.objectiveProgress.textContent = objective
+                    ? `${objective.progress}/${objective.required}`
+                    : '0/0';
             }
             
             if (typeof myAircraft.fuel === 'number' && typeof myAircraft.fuelCapacity === 'number') {
@@ -795,7 +860,7 @@ function animate() {
         crashedAircraft._respawnQueued = true;
         window.setTimeout(() => {
             if (crashedAircraft.isCrashed) {
-                if (crashedAircraft === airplane) respawnAtCheckpoint(checkpointState.lastCheckpoint);
+                if (crashedAircraft === airplane) respawnAtCheckpoint(levels.checkpointState.lastCheckpoint);
                 else crashedAircraft.restart();
             }
             crashedAircraft._respawnQueued = false;
@@ -803,10 +868,10 @@ function animate() {
     }
 
     // Environment Animation
-    world.effectController.elevation += 0.02;
+    world.effectController.elevation += 1.2 * dt;
     world.updateSun();
 
-    // Dynamic Shadows: Recalculate camera projection matrix only in 10-unit altitude thresholds
+    // Keep this map tight around the aircraft for a crisp plane shadow.
     const altitude = Math.max(myAircraft.position.y, 0);
     const currentAltitudeRange = altitude
 
@@ -824,7 +889,7 @@ function animate() {
     world.directionalLight.position.copy(myAircraft.position).addScaledVector(world.sun, 50);
     world.directionalLight.target.position.copy(myAircraft.position);
 
-    thirdPersonCamera.update();
+    camera.update(dt);
     drawAttitudeIndicator(myAircraft);
     // Render
     world.render();

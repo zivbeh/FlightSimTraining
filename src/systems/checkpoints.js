@@ -3,6 +3,7 @@ import * as THREE from 'three';
 // Runway checkpoint system. Waypoints are intentionally managed elsewhere.
 export function createCheckpointSystems({ world, checkpointConfigs, airplane, showBanner }) {
     const runways = [];
+    const groups = [];
     const checkpoints = checkpointConfigs.map((config) => ({
         config,
         position: new THREE.Vector3(config.position.x, config.position.y, config.position.z),
@@ -58,6 +59,7 @@ export function createCheckpointSystems({ world, checkpointConfigs, airplane, sh
         group.position.copy(checkpoint.position);
         world.scene.add(group);
         checkpoint.group = group;
+        groups.push(group);
 
         runways.push({
             checkpoint,
@@ -85,6 +87,7 @@ export function createCheckpointSystems({ world, checkpointConfigs, airplane, sh
         group.add(building);
         group.position.copy(checkpoint.position);
         world.scene.add(group);
+        groups.push(group);
     }
 
     function build() {
@@ -105,7 +108,7 @@ export function createCheckpointSystems({ world, checkpointConfigs, airplane, sh
         airplane.restart();
         resetVisuals();
         const spawnPosition = targetCheckpoint?.position;
-        airplane.setPosition(spawnPosition?.x ?? 0, spawnPosition ? spawnPosition.y + 5 : 5, spawnPosition?.z ?? 0);
+        airplane.setPosition(spawnPosition?.x ?? 0, spawnPosition ? spawnPosition.y + 5 : 0, spawnPosition?.z ?? 0);
         airplane.setVelocity(0, 0, 0);
         airplane.setRotation(0, 0, 0);
         airplane.setAngularVelocity(0, 0, 0);
@@ -131,6 +134,18 @@ export function createCheckpointSystems({ world, checkpointConfigs, airplane, sh
         });
     }
 
+    function recordReached(checkpoint) {
+        if (!checkpoint || checkpoint.reached) return;
+        checkpoint.reached = true;
+        checkpoint.inside = true;
+        const reward = checkpoint.config.reward ?? {};
+        if (reward.fuel > 0 && typeof airplane.fuelCapacity === 'number') {
+            airplane.fuel = Math.min(airplane.fuelCapacity, airplane.fuel + reward.fuel);
+        }
+        if (reward.money > 0 && window.gameState) window.gameState.addMoney(reward.money);
+        showBanner?.('Runway Reached - Respawn Ready');
+    }
+
     function checkRunwayCollision(planePos, planeSize = 3) {
         for (const runway of runways) {
             const dx = Math.abs(planePos.x - runway.centerX);
@@ -143,5 +158,33 @@ export function createCheckpointSystems({ world, checkpointConfigs, airplane, sh
         return null;
     }
 
-    return { build, checkpoints, respawnAtCheckpoint, update, resetVisuals, checkRunwayCollision };
+    function destroy() {
+        groups.forEach((group) => {
+            group.traverse((child) => {
+                child.geometry?.dispose?.();
+                if (Array.isArray(child.material)) {
+                    child.material.forEach((material) => material.dispose?.());
+                } else {
+                    child.material?.dispose?.();
+                }
+            });
+            world.scene.remove(group);
+        });
+        groups.length = 0;
+        runways.length = 0;
+    }
+
+    return { build, checkpoints, respawnAtCheckpoint, update, recordReached, resetVisuals, checkRunwayCollision, destroy };
+}
+                } else {
+                    child.material?.dispose?.();
+                }
+            });
+            world.scene.remove(group);
+        });
+        groups.length = 0;
+        runways.length = 0;
+    }
+
+    return { build, checkpoints, respawnAtCheckpoint, update, recordReached, resetVisuals, checkRunwayCollision, destroy };
 }

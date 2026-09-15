@@ -2,6 +2,9 @@
 // Three.js obstacle system: spheres, cylinders (any orientation), rectangular donuts (frame).
 import * as THREE from 'three';
 import { soundManager } from './sound.js';
+import { createGameEvent } from './GameEvent.js';
+
+let eventHandler = null;
 
 function vec(x=0,y=0,z=0){ return new THREE.Vector3(x,y,z); }
 
@@ -38,7 +41,7 @@ class Obstacle {
     const origPos = opts.pos ? opts.pos.clone() : vec();
     const optId = opts.id || null;
     // If this is the checkpoint ('r2'), don't scale positions/sizes so it remains pass-through
-    if (optId === 'r2') {
+    if (optId === 'r2' || opts.unscaled) {
       this.basePos = origPos.clone();
     } else {
       // Apply global position scaling: X/Z use POSITION_SCALE, Y gets extra vertical scaling
@@ -52,7 +55,7 @@ class Obstacle {
     // Deep copy and scale sizes
     const origSize = opts.size || {};
     this.size = Object.assign({}, origSize);
-    if (optId !== 'r2') {
+    if (optId !== 'r2' && !opts.unscaled) {
       if (this.size.r) this.size.r = this.size.r * SIZE_SCALE;
       if (this.size.h) this.size.h = this.size.h * SIZE_SCALE;
       if (this.size.w) this.size.w = this.size.w * SIZE_SCALE;
@@ -61,7 +64,7 @@ class Obstacle {
     this.orientation = opts.orientation || new THREE.Euler(0,0,0); // radians
     this.motion = opts.motion || null;
     // Scale motion amplitude(s) so movement matches larger scene (skip for checkpoint)
-    if (this.motion && optId !== 'r2') {
+    if (this.motion && optId !== 'r2' && !opts.unscaled) {
       if (Array.isArray(this.motion)) {
         this.motion.forEach(m => { if (m && typeof m.amp === 'number') m.amp *= MOTION_SCALE; });
       } else if (typeof this.motion.amp === 'number') {
@@ -87,10 +90,11 @@ class Obstacle {
     this.health = this.maxHealth;
     // optional price for rewards
     this.price = typeof opts.price === 'number' ? opts.price : (this.maxHealth ? Math.max(5, Math.floor(this.maxHealth/3)) : 0);
+    this.showPrice = Boolean(opts.showPrice);
     this.healthBarMesh = null;
     this._boundsSize = new THREE.Vector3();
     this._barPosition = new THREE.Vector3();
-    if (this.maxHealth) {
+    if (this.maxHealth && this.showPrice) {
       const barGeo = new THREE.BoxGeometry(1, 0.12, 0.12);
       const barMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
       this.healthBarMesh = new THREE.Mesh(barGeo, barMat);
@@ -281,15 +285,40 @@ class Obstacle {
     try { if (this.healthBarMesh && this.healthBarMesh.parent) this.healthBarMesh.parent.remove(this.healthBarMesh); } catch(e){}
     try { if (this._priceSprite && this._priceSprite.parent) this._priceSprite.parent.remove(this._priceSprite); } catch(e){}
     this._destroyed = true;
+    eventHandler?.(createGameEvent('object-destroyed', {
+      source: this,
+      sourceType: 'obstacle',
+      subject: this,
+      subjectType: this.type,
+      subjectId: this.id,
+      position: this.pos,
+      data: { obstacle: this },
+    }));
   }
 
   dispose(scene){
     if (!this.mesh) return;
-    if (scene) scene.remove(this.mesh);
+    const removeFromScene = (object) => {
+      if (!object) return;
+      if (object.parent) object.parent.remove(object);
+      else scene?.remove(object);
+    };
+
+    removeFromScene(this.mesh);
+    removeFromScene(this.healthBarMesh);
+    removeFromScene(this._priceSprite);
+
     this.mesh.traverse(c => {
       if (c.geometry) c.geometry.dispose();
       if (c.material) c.material.dispose();
     });
+    this.healthBarMesh?.geometry?.dispose?.();
+    this.healthBarMesh?.material?.dispose?.();
+    this._priceSprite?.material?.map?.dispose?.();
+    this._priceSprite?.material?.dispose?.();
+
+    this.healthBarMesh = null;
+    this._priceSprite = null;
   }
 }
 
@@ -297,56 +326,6 @@ class Obstacle {
 // const obstacles = [
 // We'll generate many large, varied targets randomly within a radius around the origin.
 const obstacles = [];
-
-// Keep the checkpoint `r2` explicit and unscaled so it's always pass-through
-obstacles.push(new Obstacle('rectdonut', { id:'r2', pos: vec(0,40,80), size:{w:50,h:50,thickness:1.7}, color:0xa0c8ff }));
-
-// helper
-function rand(min, max) { return min + Math.random() * (max - min); }
-
-// Parameters
-const TARGET_COUNT = 45;
-const RADIUS = 300; // meters (reduced so targets are slightly closer)
-const GROUND_HALF = 500; // ground plane half-size from World
-const GROUND_MARGIN = 40; // keep targets inside this margin from edges
-const MAX_HEIGHT = 200; // meters
-const SHAPES = ['sphere','cylinder','rectdonut','box','cone','torus'];
-
-for (let i = 0; i < TARGET_COUNT; i++) {
-  const angle = Math.random() * Math.PI * 2;
-  const maxR = Math.min(RADIUS, GROUND_HALF - GROUND_MARGIN);
-  const r = Math.sqrt(Math.random()) * maxR; // uniform disc inside safe radius
-  let x = Math.cos(angle) * r;
-  let z = Math.sin(angle) * r;
-  // clamp to ground bounds just in case
-  x = Math.max(-GROUND_HALF + GROUND_MARGIN, Math.min(GROUND_HALF - GROUND_MARGIN, x));
-  z = Math.max(-GROUND_HALF + GROUND_MARGIN, Math.min(GROUND_HALF - GROUND_MARGIN, z));
-  const y = Math.max(1, Math.floor(rand(0, MAX_HEIGHT)));
-  const shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
-  const id = `target_${i}`;
-  // base sizes intentionally large so after SIZE_SCALE they are very big
-  const baseSize = {
-    sphere: { r: rand(8, 18) },
-    cylinder: { r: rand(6, 14), h: rand(8, 36) },
-    rectdonut: { w: rand(20, 60), h: rand(20, 60), thickness: rand(2, 6) },
-    box: { w: rand(12, 36), h: rand(12, 36), thickness: rand(4, 12) },
-    cone: { r: rand(6, 18), h: rand(10, 40) },
-    torus: { r: rand(8, 20), tube: rand(2, 6) }
-  };
-  const healthVal = Math.floor(rand(80, 300));
-  const opts = { id, pos: vec(x, y, z), color: 0x66ccff, health: healthVal };
-  // attach shape-specific size props
-  if (shape === 'sphere') opts.size = baseSize.sphere;
-  else if (shape === 'cylinder') opts.size = baseSize.cylinder;
-  else if (shape === 'rectdonut') opts.size = baseSize.rectdonut;
-  else if (shape === 'box') opts.size = { w: baseSize.box.w, h: baseSize.box.h, thickness: baseSize.box.thickness };
-  else if (shape === 'cone') opts.size = { r: baseSize.cone.r, h: baseSize.cone.h };
-  else if (shape === 'torus') opts.size = { r: baseSize.torus.r, thickness: baseSize.torus.tube };
-
-  // derive a base price from health/size so shooting/destroying yields money
-  opts.price = Math.max(10, Math.floor(healthVal / 3));
-  obstacles.push(new Obstacle(shape, opts));
-}
 
 let _start = null;
 function initObstacles(scene, now = performance.now()){
@@ -360,7 +339,7 @@ function initObstacles(scene, now = performance.now()){
   });
 }
 
-function updateObstacles(now = performance.now()){
+function updateObstacles(now = performance.now(), deltaTime = 1 / 60){
   if (_start === null) _start = now;
   const t = (now - _start) / 1000; // seconds
   // Update obstacles
@@ -372,8 +351,9 @@ function updateObstacles(now = performance.now()){
     for (let i = scene._explosions.length - 1; i >= 0; i--) {
       const m = scene._explosions[i];
       if (!m.userData) { scene._explosions.splice(i,1); continue; }
-      m.userData.life -= 1;
-      m.position.add(m.userData.vel);
+      const frameScale = Math.max(0, deltaTime) * 60;
+      m.userData.life -= frameScale;
+      m.position.addScaledVector(m.userData.vel, frameScale);
       m.material.opacity = Math.max(0, m.userData.life / 120);
       if (m.userData.life <= 0) {
         scene.remove(m);
@@ -389,4 +369,25 @@ function disposeAll(scene){
   obstacles.forEach(o => o.dispose(scene));
 }
 
-export { obstacles, Motion, Obstacle, initObstacles, updateObstacles, disposeAll };
+function setEventHandler(handler) {
+  eventHandler = typeof handler === 'function' ? handler : null;
+}
+
+function createObstacle(scene, config = {}) {
+  const { position = {}, type = 'sphere', ...options } = config;
+  const positionVector = new THREE.Vector3(position.x ?? 0, position.y ?? 0, position.z ?? 0);
+  const obstacle = new Obstacle(type, {
+    ...options,
+    pos: positionVector,
+    scene,
+    unscaled: options.unscaled ?? true,
+  });
+
+  obstacle.scene = scene;
+  if (obstacle.healthBarMesh && !obstacle.healthBarMesh.parent) scene.add(obstacle.healthBarMesh);
+  if (obstacle._priceSprite && !obstacle._priceSprite.parent) scene.add(obstacle._priceSprite);
+  obstacles.push(obstacle);
+  return obstacle;
+}
+
+export { obstacles, Motion, Obstacle, createObstacle, initObstacles, updateObstacles, disposeAll, setEventHandler };

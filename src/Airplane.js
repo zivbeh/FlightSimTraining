@@ -2,6 +2,7 @@ import Bullet from './bullet.js';
 import { soundManager } from './sound.js';
 import { obstacles } from './obstacle.js';
 import { Aircraft } from './Aircraft.js';
+import { createGameEvent } from './GameEvent.js';
 import * as THREE from 'three';
 
 export class Airplane extends Aircraft {
@@ -17,6 +18,8 @@ export class Airplane extends Aircraft {
         this.bullets = [];
         this.fireInterval = 8; // frames between automatic shots (if auto enabled)
         this.fireCounter = 0; // frame counter for auto fire
+        this.fireCooldownMs = 150;
+        this._lastShotAt = -Infinity;
         this.bulletSpeed = 1.6; // tunable bullet travel speed
         this.bulletLife = 180; // frames until bullet expires
         this.fireAuto = false; // set true to auto-fire at `fireInterval`
@@ -30,6 +33,10 @@ export class Airplane extends Aircraft {
         
         // Propeller
         this.propeller = null
+        this.leftAileron = null;
+        this.rightAileron = null;
+        this.leftElevator = null;
+        this.rightElevator = null;
         this.propSpeed = 0
 
         const startPoint = new THREE.Vector3(0, 0, 0);
@@ -40,30 +47,44 @@ export class Airplane extends Aircraft {
     }
 
     restart() {
+        if (this.bullets) {
+            this.bullets.forEach(bullet => bullet.dispose());
+            this.bullets.length = 0;
+        }
         super.restart();
         this.resetControls();
         this.heightHistory = [];
         this.ammo = this.ammoCapacity;
+        this._lastShotAt = -Infinity;
         this.propSpeed = 0;
         this.fuel = this.fuelCapacity;
     }
 
     resetControls() {
-        this.controls = { aileronLeft: 0, aileronRight: 0, elevatorLeft: 0, elevatorRight: 0, flaps: 0, steeringWheel: 0, throttle: 0 };
+        this.controls = { aileronLeft: 0, aileronRight: 0, elevatorLeft: 0, elevatorRight: 0, steeringWheel: 0, throttle: 0 };
     }
 
-    updateTime() {
-        super.updateTime();
-        this.updateBullets();
+    updateTime(dt = 1 / 60) {
+        super.updateTime(dt);
+        this.updateBullets(dt);
         // this.visualizeArrows()
     }
 
     shoot() {
+        // The public scripting API can call shoot() many times in one tick.
+        // Enforce the fire rate here so every caller is protected from bursts.
+        const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+        if (now - this._lastShotAt < this.fireCooldownMs) return false;
+
         // Check ammo
         if (typeof this.ammo === 'number' && this.ammo <= 0) {
-            try { soundManager.playEmpty(); } catch(e) {}
-            return;
+            if (now - this._lastShotAt >= 250) {
+                this._lastShotAt = now;
+                try { soundManager.playEmpty(); } catch(e) {}
+            }
+            return false;
         }
+        this._lastShotAt = now;
         // Determine forward direction (fallback if not available)
         let forward = new THREE.Vector3(0, 0, 1);
         if (this.directions && this.directions.z && this.directions.z.length()) {
@@ -82,12 +103,37 @@ export class Airplane extends Aircraft {
         } catch (e) {}
         // play sound
         try { soundManager.playShoot(); } catch (e) {}
+        this.onGameEvent?.(createGameEvent('aircraft-shot', {
+            source: this,
+            sourceType: 'aircraft',
+            subject: b,
+            subjectType: 'bullet',
+            position: spawnPos,
+            data: { aircraft: this, bullet: b },
+        }));
+        return true;
     }
 
     // Override updateAnimations to include bullet updates
-    updateAnimations() {
-        super.updateAnimations();
-        this.updatePropeller()
+    updateAnimations(dt = 1 / 60) {
+        super.updateAnimations(dt);
+        this.updatePropeller(dt)
+        this.updateControlSurfaces()
+    }
+
+    updateControlSurfaces() {
+        // if (this.leftAileron) {
+        //     this.leftAileron.rotation.x = THREE.MathUtils.degToRad(this.controls.aileronLeft);
+        // }
+        // if (this.rightAileron) {
+        //     this.rightAileron.rotation.x = THREE.MathUtils.degToRad(this.controls.aileronRight);
+        // }
+        // if (this.leftElevator) {
+        //     this.leftElevator.rotation.x = THREE.MathUtils.degToRad(this.controls.elevatorLeft);
+        // }
+        // if (this.rightElevator) {
+        //     this.rightElevator.rotation.x = THREE.MathUtils.degToRad(this.controls.elevatorRight);
+        // }
     }
 
     // Override updateChecks to track height history
@@ -101,8 +147,8 @@ export class Airplane extends Aircraft {
         }
     }
 
-    updateBullets() {
-        this.bullets.forEach(b => b.update());
+    updateBullets(dt = 1 / 60) {
+        this.bullets.forEach(b => b.update(dt));
         this.bullets = this.bullets.filter(b => b.active);
     }
 
@@ -134,7 +180,7 @@ export class Airplane extends Aircraft {
         this.arrowCombined.position.set(this.position.x, this.position.y, this.position.z);
     }
 
-    handleGroundCollision() {
+    handleGroundCollision(dt = 1 / 60) {
         const floorHeight = -this.groundOffset.y;
         // Only check for crash at the moment of impact (transitioning from air to ground)
         if (this.wasAirborne) {
@@ -169,18 +215,19 @@ export class Airplane extends Aircraft {
 
         const newRotationX = Math.max(this.rotation.x, this.rotation.x * this.relativeVelocity.z * 2)
         this.setRotationX(newRotationX)
-        this.applyGroundFriction()
+        this.applyGroundFriction(dt)
         if (this.checkRunwayLanding()) {
-            this.applyRunwayFriction();
+            this.applyRunwayFriction(dt);
         }
     }
 
-    updateAerodynamics() {
+    updateAerodynamics(dt = 1 / 60) {
+        const frameScale = dt * 60;
         const dc = [0.07, 0.25, 0.004]
         const adc = [0.07, 0.02, 0.09]
         const adlc = [[0, 0.5, 0], [-1.6, 0, 0], [-0.5, 0, 0]];
-        this.applyDrag(dc, adc, adlc)
-        this.applyThrust()
+        this.applyDrag(dc, adc, adlc, dt)
+        this.applyThrust(dt)
 
         const dir = this.directions
         const vel = this.relativeVelocity
@@ -188,21 +235,22 @@ export class Airplane extends Aircraft {
         const zDrag = -Math.sign(vel.z) * Math.pow(vel.z, 2) * zDragCoeff;
         
         // add angular drag from controls
-        this.angularVelocity.addScaledVector(dir.x, -zDrag * this.controls.elevatorLeft * 0.105);
-        this.angularVelocity.addScaledVector(dir.x, -zDrag * this.controls.elevatorRight * 0.105);
-        this.angularVelocity.addScaledVector(dir.y, -zDrag * this.controls.elevatorLeft * -0.035);
-        this.angularVelocity.addScaledVector(dir.y, -zDrag * this.controls.elevatorRight * 0.035);
-        this.angularVelocity.addScaledVector(dir.z, -zDrag * this.controls.aileronLeft * 0.06);
-        this.angularVelocity.addScaledVector(dir.z, -zDrag * this.controls.aileronRight * -0.06);
+        this.angularVelocity.addScaledVector(dir.x, -zDrag * this.controls.elevatorLeft * 0.105 * frameScale);
+        this.angularVelocity.addScaledVector(dir.x, -zDrag * this.controls.elevatorRight * 0.105 * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, -zDrag * this.controls.elevatorLeft * -0.035 * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, -zDrag * this.controls.elevatorRight * 0.035 * frameScale);
+        this.angularVelocity.addScaledVector(dir.z, -zDrag * this.controls.aileronLeft * 0.06 * frameScale);
+        this.angularVelocity.addScaledVector(dir.z, -zDrag * this.controls.aileronRight * -0.06 * frameScale);
     }
 
 
     // Override applyThrust with fuel management
-    applyThrust() {
+    applyThrust(dt = 1 / 60) {
         if (!this.model) return;
         if (this.isCrashed) return
         const throttle = this.controls.throttle
-        this.fuel -= this.fuelConsumptionRate * Math.pow(throttle, 3)
+        const frameScale = dt * 60;
+        this.fuel -= this.fuelConsumptionRate * Math.pow(throttle, 1.5) * frameScale
         if (this.fuel < 0) {
             this.fuel = 0
             return
@@ -229,10 +277,10 @@ export class Airplane extends Aircraft {
         // 4. Calculate final magnitude
         const thrustMagnitude = throttle * thrustEfficiency * densityFactor * 0.03 * (this.speedMultiplier || 1);
 
-        this.velocity.addScaledVector(forward, thrustMagnitude);
+        this.velocity.addScaledVector(forward, thrustMagnitude * frameScale);
     }
 
-    applyGroundFriction() {
+    applyGroundFriction(dt = 1 / 60) {
         const dir = this.directions
         const vel = this.relativeVelocity
         const avel = this.relativeAngularVelocity
@@ -240,16 +288,17 @@ export class Airplane extends Aircraft {
         const zMuK = 0.007;
         const xMuK = 0.2;
 
-        this.velocity.addScaledVector(dir.x, -vel.x * xMuK);
-        this.velocity.addScaledVector(dir.z, -vel.z * zMuK);
+        const frameScale = dt * 60;
+        this.velocity.addScaledVector(dir.x, -vel.x * xMuK * frameScale);
+        this.velocity.addScaledVector(dir.z, -vel.z * zMuK * frameScale);
 
         const yAngularMuK = 0.02;
 
-        this.angularVelocity.addScaledVector(dir.y, -avel.y * yAngularMuK);
-        this.angularVelocity.addScaledVector(dir.y, vel.z * this.controls.steeringWheel * -0.0001);
+        this.angularVelocity.addScaledVector(dir.y, -avel.y * yAngularMuK * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, vel.z * this.controls.steeringWheel * -0.0001 * frameScale);
     }
 
-    applyRunwayFriction() {
+    applyRunwayFriction(dt = 1 / 60) {
         const runwayCollision = this.checkRunwayLanding();
         if (!runwayCollision) return;
 
@@ -263,7 +312,7 @@ export class Airplane extends Aircraft {
             return;
         }
 
-        const brakeFactor = 0.975;
+        const brakeFactor = Math.pow(0.975, dt * 60);
         this.velocity.x *= brakeFactor;
         this.velocity.z *= brakeFactor;
 
@@ -271,11 +320,12 @@ export class Airplane extends Aircraft {
         if (Math.abs(this.velocity.z) < 0.01) this.velocity.z = 0;
     }
 
-    updatePropeller() {
+    updatePropeller(dt = 1 / 60) {
         if (!this.model) return;
         if (!this.propeller) return
-        this.propeller.rotateZ(-this.propSpeed)
-        this.propSpeed -= this.propSpeed * 0.025
+        const frameScale = dt * 60;
+        this.propeller.rotateZ(-this.propSpeed * frameScale)
+        this.propSpeed *= Math.pow(1 - 0.025, frameScale)
     }
 
     // Airplane controls
@@ -288,7 +338,6 @@ export class Airplane extends Aircraft {
         this.controls.aileronRight = 0;
         this.controls.elevatorLeft = 0;
         this.controls.elevatorRight = 0;
-        this.controls.flaps = 0;
         this.controls.steeringWheel = 0;
         this.controls.throttle = 0;
 
@@ -322,13 +371,7 @@ export class Airplane extends Aircraft {
             this.controls.throttle = 0.8;
         }
         if (keys.has('r')) {
-            const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
-            if (!this._lastShotAt) this._lastShotAt = 0;
-            const cooldownMs = 150;
-            if (now - this._lastShotAt >= cooldownMs) {
-                this.shoot();
-                this._lastShotAt = now;
-            }
+            this.shoot();
         }
         this.controls.elevatorLeft = Math.max(-angle, Math.min(angle, this.controls.elevatorLeft));
         this.controls.elevatorRight = Math.max(-angle, Math.min(angle, this.controls.elevatorRight));
@@ -339,28 +382,41 @@ export class Airplane extends Aircraft {
     // controls
 
     getApi() {
+        const maxAngle = 16;
+        const rangeWarning = (value) => {
+            if (Math.abs(value) > maxAngle) {
+                this.codeRunner.log("System: Actuator max deflection is " + maxAngle + " degrees. Input value will be clamped to this range.");
+            }
+        }
         return {
             setAileronLeft: (instance, value) => {
-                this.controls.aileronLeft = value;
+                this.controls.aileronLeft = Math.min(maxAngle, Math.max(-maxAngle, value));
             },
             setAileronRight: (instance, value) => {
-                this.controls.aileronRight = value;
+                rangeWarning(value);
+                this.controls.aileronRight = Math.min(maxAngle, Math.max(-maxAngle, value));
             },
             setElevatorLeft: (instance, value) => {
-                this.controls.elevatorLeft = value;
+                rangeWarning(value);
+                this.controls.elevatorLeft = Math.min(maxAngle, Math.max(-maxAngle, value));
             },
             setElevatorRight: (instance, value) => {
-                this.controls.elevatorRight = value;
-            },
-            setFlaps: (instance, value) => {
-                this.controls.flaps = value;
+                rangeWarning(value);
+                this.controls.elevatorRight = Math.min(maxAngle, Math.max(-maxAngle, value));
             },
             setSteeringWheel: (instance, value) => {
-                this.controls.steeringWheel = value;
+                rangeWarning(value);
+                this.controls.steeringWheel = Math.min(maxAngle, Math.max(-maxAngle, value));
             },
             setThrottle: (instance, value) => {
-                this.controls.throttle = value;
+                if (value < 0 || value > 1) {
+                    this.codeRunner.log("System: Throttle range is 0-1. Input value will be clamped to this range.");
+                }
+                this.controls.throttle = Math.min(1, Math.max(0, value));
             },
+            shoot: (instance) => {
+                this.shoot();
+            }
         }
     }
     
@@ -378,42 +434,21 @@ export class Airplane extends Aircraft {
     
 
     loadModel() {
-        super.loadModel('./assets/SIERRA_ARC_GND_0824.glb');
-        
-        // After parent loads, identify and setup propeller parts
-        setTimeout(() => {
-            if (!this.model) return;
-            
-            this.propeller = new THREE.Group();
-            let propellerParts = [];
-
-            this.model.traverse((child) => {
-                if (child.isMesh) {
-                    const isPropPart = child.name === 'SIERRA_ARC_GND_0824002_1' || child.name === 'SIERRA_ARC_GND_0824002';
-                    if (isPropPart) {
-                        propellerParts.push(child);
-                    }
-                }
-            });
-
-            if (propellerParts.length > 0) {
-                const worldPos = new THREE.Vector3();
-                propellerParts[0].getWorldPosition(worldPos);
-                
-                this.model.worldToLocal(worldPos);
-                this.propeller.position.copy(worldPos);
-                this.model.add(this.propeller);
-
-                propellerParts.forEach(part => {
-                    this.propeller.add(part);
-                    part.position.set(0, 0, 0);
-                    part.scale.set(1, 1, 1); 
-                });
-
-                const globalPropScale = 0.01;
-                this.propeller.scale.set(globalPropScale, globalPropScale, globalPropScale);
+        this.onModelLoaded = (model) => {
+            // The individual propeller meshes are descendants of the PROP node.
+            // Rotate their existing parent so the GLB's pivot and transforms stay intact.
+            this.propeller = model.getObjectByName('PROP')
+            if (!this.propeller) {
+                console.warn('Could not find the PROP node in the airplane model.');
             }
-        }, 500);
+
+            this.leftAileron = model.getObjectByName('Left_Aileron');
+            this.rightAileron = model.getObjectByName('Right_Aileron');
+            this.leftElevator = model.getObjectByName('Left_Elevator');
+            this.rightElevator = model.getObjectByName('Right_Elevator');
+        };
+
+        super.loadModel('./assets/SIERRA_ARC_GND_0824.glb');
     }
 
 }

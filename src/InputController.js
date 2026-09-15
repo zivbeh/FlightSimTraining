@@ -27,8 +27,17 @@ export class InputController {
 
         // Mouse Wheel
         this.canvas.addEventListener('wheel', (e) => {
-            this.mouse.wheelDelta = e.deltaY;
-        }, { passive: true });
+            e.preventDefault();
+            e.stopImmediatePropagation();
+
+            // Normalize wheel units: browsers may report pixels, lines, or pages.
+            const unitScale = e.deltaMode === 1
+                ? 16
+                : e.deltaMode === 2
+                    ? this.canvas.clientHeight
+                    : 1;
+            this.mouse.wheelDelta += e.deltaY * unitScale;
+        }, { passive: false, capture: true });
 
         // Optional: Context Menu (prevents right-click menu from popping up in-game)
         this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -43,6 +52,12 @@ export class InputController {
         if (event.button === 0) this.mouse.left = isDown;
         if (event.button === 1) this.mouse.middle = isDown;
         if (event.button === 2) this.mouse.right = isDown;
+    }
+
+    consumeWheelDelta() {
+        const delta = this.mouse.wheelDelta;
+        this.mouse.wheelDelta = 0;
+        return delta;
     }
 
     handleKeyDown(event) {

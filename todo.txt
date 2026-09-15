@@ -1,10 +1,21 @@
 add interactive explanation about api functions
 add game mode and levels
-when restart, plane start with height not 0, fix it
 make infinite world
-add world decoration
+add world decoration like mountains and villages 
 in code editor, allow control tab and comment mutliple lines at once
 better naming: instead of main.js, should be plane.js
-free style infinite fuel mode
 button to copy the code, and button to download the code as txt file, and also load from txt
-control camera view from mouse relative to plane camera
+make smaller rings to go through
+add wind
+add cars
+make airplane be able to drop bombs
+make control panels physically move
+add getting over it mode
+wheel ground contact dust effect
+make airplane physics interaction with ground more realistic
+add sounds: motor, ground contact, crash
+when crash, instead of red particals, show explosion animation
+make runways more esthetic
+when propeller spins fast, should display a black disk with opacity
+make the bullets look realistic, and appropriate sound
+

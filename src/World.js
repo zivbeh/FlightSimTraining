@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Sky } from 'https://unpkg.com/three@0.160.0/examples/jsm/objects/Sky.js';
+import { Runway } from './Runway.js';
 
 export class World {
     constructor(canvasId) {
@@ -46,6 +47,7 @@ export class World {
         this._initSky();
         this._initLights();
         this._initGround();
+        this.runway = new Runway(this);
         this._setupResize();
     }
 
@@ -148,6 +150,42 @@ export class World {
         this.camera.aspect = this.width / this.height;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(this.width, this.height);
+    }
+
+    /**
+     * Removes every object added to the world scene and releases its GPU resources.
+     *
+     * @returns {number} The number of top-level objects removed from the scene.
+     */
+    removeAllObjects() {
+        const objects = [...this.scene.children];
+        const disposedTextures = new Set();
+
+        objects.forEach((object) => {
+            object.traverse((child) => {
+                child.geometry?.dispose?.();
+
+                const materials = Array.isArray(child.material)
+                    ? child.material
+                    : child.material
+                        ? [child.material]
+                        : [];
+
+                materials.forEach((material) => {
+                    Object.values(material).forEach((value) => {
+                        if (value?.isTexture && !disposedTextures.has(value)) {
+                            value.dispose();
+                            disposedTextures.add(value);
+                        }
+                    });
+                    material.dispose?.();
+                });
+            });
+
+            this.scene.remove(object);
+        });
+
+        return objects.length;
     }
 
     render() {
