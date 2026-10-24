@@ -60,9 +60,13 @@ export class Rocket extends Aircraft {
     
     updateAerodynamics(dt = 1 / 60) {
         const frameScale = dt * 60;
-        const dc = [0.07, 0.004, 0.07]
-        const adc = [0.07, 0.02, 0.07]
-        const adlc = [[0, 0, -0.5], [0, 0, 0], [0.5, 0, 0]];
+        // A slim rocket body makes little side force, so velocity lags behind
+        // the nose instead of snapping to it like a wing. Low angular damping
+        // lets rotation carry momentum, and the stronger weathervane torque
+        // keeps the nose pointed into the airflow.
+        const dc = [0.03, 0.004, 0.03]
+        const adc = [0.035, 0.02, 0.035]
+        const adlc = [[0, 0, -0.8], [0, 0, 0], [0.8, 0, 0]];
         this.applyDrag(dc, adc, adlc, dt)
         this.applyThrust(dt)
 
@@ -70,19 +74,26 @@ export class Rocket extends Aircraft {
         const vel = this.relativeVelocity
         const zDragCoeff = 0.004; // forward drag
         const zDrag = Math.sign(vel.y) * Math.pow(vel.y, 2) * zDragCoeff;
+        // Small fins: control torque per unit of fin deflection
+        const finAuthority = 0.05;
 
         // fin number is like a clock order
         // add angular drag from controls
-        this.angularVelocity.addScaledVector(dir.x, zDrag * this.controls.fin2 * 0.1 * frameScale);
-        this.angularVelocity.addScaledVector(dir.x, zDrag * this.controls.fin4 * -0.1 * frameScale);
-        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin1 * 0.1 * frameScale);
-        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin2 * 0.1 * frameScale);
-        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin3 * 0.1 * frameScale);
-        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin4 * 0.1 * frameScale);
-        this.angularVelocity.addScaledVector(dir.z, zDrag * this.controls.fin1 * -0.1 * frameScale);
-        this.angularVelocity.addScaledVector(dir.z, zDrag * this.controls.fin3 * 0.1 * frameScale);
+        this.angularVelocity.addScaledVector(dir.x, zDrag * this.controls.fin2 * finAuthority * frameScale);
+        this.angularVelocity.addScaledVector(dir.x, zDrag * this.controls.fin4 * -finAuthority * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin1 * finAuthority * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin2 * finAuthority * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin3 * finAuthority * frameScale);
+        this.angularVelocity.addScaledVector(dir.y, zDrag * this.controls.fin4 * finAuthority * frameScale);
+        this.angularVelocity.addScaledVector(dir.z, zDrag * this.controls.fin1 * -finAuthority * frameScale);
+        this.angularVelocity.addScaledVector(dir.z, zDrag * this.controls.fin3 * finAuthority * frameScale);
     }
     
+    // Spawn the trail at the nozzle (bottom of the rocket along its own axis)
+    getTrailOrigin() {
+        return this.position.clone().addScaledVector(this.directions.y, this.groundOffset.y);
+    }
+
     applyThrust(dt = 1 / 60) {
         if (!this.model) return;
         if (this.isCrashed) return
@@ -208,6 +219,17 @@ export class Rocket extends Aircraft {
         this.controls.fin3 = f3
         this.controls.fin4 = f4
         this.controls.throttle = throttle
+    }
+
+    // Shown in the code editor's API reference panel
+    getApiDocs() {
+        const fin = (n) => ({ name: `setFin${n}`, args: 'value', example: `setFin${n}(2)`,
+            description: `Deflects fin ${n} (fins are numbered like a clock). The keyboard uses about -8 to 8. Fins only steer when the rocket is moving fast.` });
+        return [
+            { name: 'setThrottle', args: 'value', example: 'setThrottle(1)',
+              description: 'Rocket engine power. Ranges from 0 (off) to 1 (full power). Burns fuel.' },
+            fin(1), fin(2), fin(3), fin(4),
+        ];
     }
 
     getApi() {

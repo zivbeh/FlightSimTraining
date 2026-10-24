@@ -7,7 +7,7 @@ export class Runway {
         this.tileCount = options.tileCount ?? 6;
         this.position = new THREE.Vector3(
             options.x ?? 0,
-            options.y ?? 0.025,
+            options.y ?? 0.05,
             options.z ?? 27
         );
 

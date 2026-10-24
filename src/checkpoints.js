@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { obstacles } from './obstacle.js';
+import { createGameEvent } from './GameEvent.js';
 
 // Runway checkpoint system. Waypoints are intentionally managed elsewhere.
 export function createCheckpointSystems({ world, checkpointConfigs, airplane, showBanner }) {
@@ -39,7 +41,7 @@ export function createCheckpointSystems({ world, checkpointConfigs, airplane, sh
             new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95, metalness: 0 })
         );
         runwaySurface.rotation.x = -Math.PI / 2;
-        runwaySurface.position.y = platformHeight + 0.205;
+        runwaySurface.position.y = platformHeight + 0.3;
         runwaySurface.receiveShadow = true;
         group.add(runwaySurface);
 
@@ -54,7 +56,7 @@ export function createCheckpointSystems({ world, checkpointConfigs, airplane, sh
             length: runwayLength,
             centerX: checkpoint.position.x,
             centerZ: checkpoint.position.z,
-            platformTop: checkpoint.position.y + platformHeight + 0.2,
+            platformTop: checkpoint.position.y + platformHeight + 0.3,
         });
     }
 
@@ -121,16 +123,48 @@ export function createCheckpointSystems({ world, checkpointConfigs, airplane, sh
         });
     }
 
+    function recordReached(checkpoint) {
+        if (!checkpoint || checkpoint.reached) return;
+        checkpoint.reached = true;
+        checkpoint.inside = true;
+        const reward = checkpoint.config.reward ?? {};
+        if (reward.fuel > 0 && typeof airplane.fuelCapacity === 'number') {
+            airplane.fuel = Math.min(airplane.fuelCapacity, airplane.fuel + reward.fuel);
+        }
+        if (reward.money > 0 && window.gameState) window.gameState.addMoney(reward.money);
+        showBanner?.('Runway Reached - Respawn Ready');
+    }
+
     function checkRunwayCollision(planePos, planeSize = 3) {
         for (const runway of runways) {
             const dx = Math.abs(planePos.x - runway.centerX);
             const dz = Math.abs(planePos.z - runway.centerZ);
             const dy = planePos.y - runway.platformTop;
-            if (dx < runway.width / 2 + planeSize && dz < runway.length / 2 + planeSize && dy >= -planeSize && dy <= 0.6) {
+            const isCenteredOnRunway = dx <= runway.width / 2 * 0.85 && dz <= runway.length / 2 * 0.9;
+            if (isCenteredOnRunway && dy >= -planeSize && dy <= 0.6) {
                 return { runway, landingHeight: runway.platformTop, distanceAbove: dy };
             }
         }
         return null;
+    }
+
+    function checkRunwayLanding(aircraft) {
+        const contact = checkRunwayCollision(
+            aircraft.position, aircraft.boundingRadius || 2.5
+        );
+        if (!contact) return null;
+        return {
+            landingHeight: contact.landingHeight,
+            onTouchdown: () => aircraft.onGameEvent?.(createGameEvent('aircraft-landed', {
+                source: aircraft,
+                sourceType: 'aircraft',
+                subject: contact.runway.checkpoint,
+                subjectType: 'runway',
+                subjectId: contact.runway.checkpoint.config.id,
+                position: contact.runway.checkpoint.position,
+                data: { aircraft, runway: contact.runway },
+            })),
+        };
     }
 
     function destroy() {
@@ -149,5 +183,51 @@ export function createCheckpointSystems({ world, checkpointConfigs, airplane, sh
         runways.length = 0;
     }
 
-    return { build, checkpoints, respawnAtCheckpoint, update, resetVisuals, checkRunwayCollision, destroy };
+    return { build, checkpoints, respawnAtCheckpoint, update, recordReached, resetVisuals, checkRunwayCollision, checkRunwayLanding, destroy };
+}
+
+let checkpointEntries = new WeakMap();
+
+export function resetCheckpointChecks() {
+    checkpointEntries = new WeakMap();
+}
+
+export function checkpointCheck(aircraft) {
+    const checkpointID = 'r2';
+    const checkpoint = obstacles.find(o => o.id === checkpointID);
+    if (!checkpoint || !checkpoint.mesh?.parent || checkpoint._destroyed) {
+        checkpointEntries.delete(aircraft);
+        return false;
+    }
+
+    // Get the current position and size of the checkpoint
+    const checkpointPos = checkpoint.pos;
+    const { w, h, thickness } = checkpoint.size;
+
+    // Calculate inner bounds (inside the frame, excluding the border thickness)
+    const innerHalfW = w / 2 - thickness;
+    const innerHalfH = h / 2 - thickness;
+    const halfT = thickness / 2;
+
+    // Preserve the existing pass tolerance: the center must be inside the opening.
+    const inX = Math.abs(aircraft.position.x - checkpointPos.x) <= innerHalfW;
+    const inY = Math.abs(aircraft.position.y - checkpointPos.y) <= innerHalfH;
+    const inZ = Math.abs(aircraft.position.z - checkpointPos.z) <= halfT;
+    const passed = inX && inY && inZ;
+
+    // Award money once per pass (edge-trigger)
+    if (checkpointEntries.get(aircraft) !== checkpoint && passed) {
+        checkpointEntries.set(aircraft, checkpoint);
+        const checkpointReward = 200; // flat reward for passing checkpoint
+        try {
+            if (typeof window !== 'undefined' && window.gameState) {
+                if (typeof window.gameState.addMoney === 'function') window.gameState.addMoney(checkpointReward);
+                else if (typeof window.gameState.money === 'number') window.gameState.money += checkpointReward;
+            }
+        } catch(e){}
+        console.log(`Passed checkpoint '${checkpointID}' — awarded ${checkpointReward}`);
+    }
+    if (!passed) checkpointEntries.delete(aircraft);
+
+    return passed;
 }

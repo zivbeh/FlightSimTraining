@@ -15,12 +15,16 @@ export class CodeRunner {
         this.runTime = 0;
         this.lastResponseTime = 0;
         this.info = {};
+        this.getWorldInfo = () => null;
         this.running = false;
     }
 
     setInfo(info) {
-        this.info = info;
-        this.callbacks.onSetInfo(info);
+        const world = this.getWorldInfo();
+        this.info = { ...info };
+        delete this.info.world;
+        if (world) this.info.world = world;
+        this.callbacks.onSetInfo(this.info);
     }
 
     log(...args) {
@@ -28,6 +32,7 @@ export class CodeRunner {
     }
 
     run(userCode) {
+        this.setInfo(this.info);
         this.log("System: Initializing...");
         this.callbacks.onStatusChange(true);
         this.runTime = 0;

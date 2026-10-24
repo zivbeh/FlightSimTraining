@@ -15,7 +15,7 @@ export class Waypoint extends Body {
         this.height = height;
         this.width = width;
         this.depth = depth;
-        this.startHeight = startHeight;
+        this.startHeight = startHeight - 0.005;
         this.type = type;
         this.opacity = opacity;
         this.hideOnPass = hideOnPass;

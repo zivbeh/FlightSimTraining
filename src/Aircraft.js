@@ -1,9 +1,6 @@
 import * as THREE from 'three';
-import { soundManager } from './sound.js';
-import { obstacles } from './obstacle.js';
 import { CodeRunner } from './CodeRunner.js';
 import { DynamicBody } from './Body.js';
-import { createGameEvent } from './GameEvent.js';
 
 export class Aircraft extends DynamicBody {
     // Earth constants
@@ -24,16 +21,17 @@ export class Aircraft extends DynamicBody {
         this.scale = 5
         this.groundOffset = {x: 0, y: -0.55, z: 0}
         this.info = {}
-        this._runwayTouchdown = false
+        this._surfaceTouchdown = false
         this.api = this.getApi();
         this.codeRunner = new CodeRunner(this.api)
     }
 
     restart() {
         super.restart();
+        this.clearParticles();
         this.isCrashed = false;
         this.wasAirborne = false;
-        this._runwayTouchdown = false;
+        this._surfaceTouchdown = false;
         if (!this.codeRunner) return
         this.codeRunner.stop()
     }
@@ -43,50 +41,35 @@ export class Aircraft extends DynamicBody {
         return this.position.y > floorHeight + 0.01
     }
     
-    updateTime(dt = 1 / 60) {
+    updateTime(dt = 1 / 60, landingContact = null) {
         if (!this.model) return
         this.calculateObservedInfo()
-        this.updateGravityAndGround(dt)
+        this.updateGravityAndGround(dt, landingContact)
         this.updateMovement(dt)
         this.updateRotation(dt)
 
         this.updateAerodynamics(dt)
         this.updateAnimations(dt)
-        this.updateChecks()
         this.updateCodeRunner()
     }   
 
-    collisionCheck() {
-        const checkpointID = 'r2';
-        const obstacle = obstacles.find(o => o.id === checkpointID);
-        if (!obstacle || !obstacle.mesh?.parent || obstacle._destroyed) return false;
-
-        const obsPos = obstacle.pos;
-        const { w, h, thickness } = obstacle.size;
-
-        const halfW = w / 2;
-        const halfH = h / 2;
-        const halfT = thickness / 2;
-
-        const innerHalfW = halfW - thickness;
-        const innerHalfH = halfH - thickness;
-
-        const planeRadius = this.boundingRadius || 2.5;
-
-        // Check if within full bounding box (considering plane size)
-        const fullInX = Math.abs(this.position.x - obsPos.x) <= (halfW + planeRadius);
-        const fullInY = Math.abs(this.position.y - obsPos.y) <= (halfH + planeRadius);
-        const fullInZ = Math.abs(this.position.z - obsPos.z) <= (halfT + planeRadius);
-
-        // Check if within inner area (no collision) - use full inner bounds
-        const innerInX = Math.abs(this.position.x - obsPos.x) <= innerHalfW;
-        const innerInY = Math.abs(this.position.y - obsPos.y) <= innerHalfH;
-
-        const inFull = fullInX && fullInY && fullInZ;
-        const inInner = innerInX && innerInY; // Ignore z for inner area check
-
-        // Collision if in full but not in inner (i.e., hitting the frame)
-        return inFull && !inInner;
+    /**
+     * Tests a world-space point against each mesh's local bounding box.
+     * This follows model transforms but approximates the aircraft's surface.
+     */
+    collidesWithPoint(point) {
+        if (!this.model) return false;
+        this.model.updateWorldMatrix(true, true);
+        const localPoint = new THREE.Vector3();
+        let collides = false;
+        this.model.traverse((mesh) => {
+            if (collides || !mesh.isMesh || !mesh.geometry) return;
+            if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+            localPoint.copy(point);
+            mesh.worldToLocal(localPoint);
+            collides = mesh.geometry.boundingBox.containsPoint(localPoint);
+        });
+        return collides;
     }
 
     handleGroundCollision(dt = 1 / 60) {
@@ -126,48 +109,39 @@ export class Aircraft extends DynamicBody {
         this.setRotationX(newRotationX)
     }
 
-    checkRunwayLanding() {
-        if (!this.checkpointSystems || typeof this.checkpointSystems.checkRunwayCollision !== 'function') return null;
-        const planeRadius = this.boundingRadius || 2.5;
-        return this.checkpointSystems.checkRunwayCollision(this.position, planeRadius);
-    }
-
-    updateGravityAndGround(dt = 1 / 60) {
+    updateGravityAndGround(dt = 1 / 60, landingContact = null) {
         const floorHeight = -this.groundOffset.y;
 
-        const runwayCollision = this.checkRunwayLanding();
-        if (runwayCollision && this.velocity.y <= 0.05) {
+        if (landingContact && this.velocity.y <= 0.05) {
             const impactSpeed = Math.abs(this.velocity.y);
             const rollAngle   = Math.abs(this.rotation.z);
+            const runway = landingContact.runway;
+            const onRunwayCenter = runway
+                ? Math.abs(this.position.x - runway.centerX) <= runway.width * 0.45
+                && Math.abs(this.position.z - runway.centerZ) <= runway.length * 0.45
+                : true;
 
-            const hardImpact = impactSpeed > 0.15;
-            const badRoll    = rollAngle > 25 * Math.PI / 180;
+            const hardImpact = impactSpeed > 0.22;
+            const badRoll    = rollAngle > 35 * Math.PI / 180;
+            const validLanding = !hardImpact && !badRoll && onRunwayCenter;
 
-            if (!hardImpact && !badRoll) {
-                this.position.y = runwayCollision.landingHeight;
+            if (validLanding) {
+                this.position.y = landingContact.landingHeight;
                 this.velocity.y = 0;
                 this.wasAirborne = false;
-                if (!this._runwayTouchdown) {
-                    this.onGameEvent?.(createGameEvent('aircraft-landed', {
-                        source: this,
-                        sourceType: 'aircraft',
-                        subject: runwayCollision.runway.checkpoint,
-                        subjectType: 'runway',
-                        subjectId: runwayCollision.runway.checkpoint.config.id,
-                        position: runwayCollision.runway.checkpoint.position,
-                        data: { aircraft: this, runway: runwayCollision.runway },
-                    }));
+                if (!this._surfaceTouchdown) {
+                    landingContact.onTouchdown?.();
                 }
-                this._runwayTouchdown = true;
+                this._surfaceTouchdown = true;
                 if (typeof this.applyRunwayFriction === 'function') {
-                    this.applyRunwayFriction(dt);
+                    this.applyRunwayFriction(dt, landingContact);
                 }
                 return;
             }
 
-            if (this.position.y <= runwayCollision.landingHeight + 0.1) {
+            if (this.position.y <= landingContact.landingHeight + 0.1) {
                 this.handleCrash();
-                this.position.y = runwayCollision.landingHeight;
+                this.position.y = landingContact.landingHeight;
                 this.wasAirborne = false;
                 return;
             }
@@ -177,10 +151,10 @@ export class Aircraft extends DynamicBody {
             const gravityAccel = this.gravity;
             this.velocity.y -= gravityAccel * dt * 60;
             this.wasAirborne = true;
-            this._runwayTouchdown = false;
+            this._surfaceTouchdown = false;
 
         } else {
-            this.handleGroundCollision(dt);
+            this.handleGroundCollision(dt, landingContact);
         }
     }
 
@@ -188,64 +162,6 @@ export class Aircraft extends DynamicBody {
     updateAnimations(dt = 1 / 60) {
         // Spawn smoke trail
         this.updateTrail(dt);
-    }
-
-    updateChecks() {
-        // find if passed thru checkpoint
-        let passed = this.checkpointCheck();
-        if (passed) {
-            console.log("airplane passed thru checkpoint")
-        }
-
-        // check for collision with obstacles
-        if (this.collisionCheck()) {
-            this.handleCrash();
-        }
-    }
-
-    checkpointCheck() {
-        const checkpointID = 'r2';
-        const checkpoint = obstacles.find(o => o.id === checkpointID);
-        if (!checkpoint || !checkpoint.mesh?.parent || checkpoint._destroyed) return false;
-
-        // Get the current position and size of the checkpoint
-        const checkpointPos = checkpoint.pos;
-        const { w, h, thickness } = checkpoint.size;
-
-        // Calculate inner bounds (inside the frame, excluding the border thickness)
-        const innerHalfW = w / 2 - thickness;
-        const innerHalfH = h / 2 - thickness;
-        const halfT = thickness / 2;
-
-        // Account for airplane size (from mesh bounding box)
-        const planeRadius = this.boundingRadius || 2.5; // Fallback if not loaded yet
-
-        // Effective inner bounds considering plane size
-        const effectiveInnerHalfW = innerHalfW; // Use full inner bounds for easier passing
-        const effectiveInnerHalfH = innerHalfH;
-        const effectiveHalfT = halfT;
-
-        // Check if airplane is within the effective inner rectangular bounds
-        const inX = Math.abs(this.position.x - checkpointPos.x) <= effectiveInnerHalfW;
-        const inY = Math.abs(this.position.y - checkpointPos.y) <= effectiveInnerHalfH;
-        const inZ = Math.abs(this.position.z - checkpointPos.z) <= effectiveHalfT;
-                const passed = inX && inY && inZ;
-
-                // Award money once per pass (edge-trigger)
-                if (!this._wasInCheckpoint && passed) {
-                    this._wasInCheckpoint = true;
-                    const checkpointReward = 200; // flat reward for passing checkpoint
-                    try {
-                        if (typeof window !== 'undefined' && window.gameState) {
-                            if (typeof window.gameState.addMoney === 'function') window.gameState.addMoney(checkpointReward);
-                            else if (typeof window.gameState.money === 'number') window.gameState.money += checkpointReward;
-                        }
-                    } catch(e){}
-                    console.log(`Passed checkpoint '${checkpointID}' — awarded ${checkpointReward}`);
-                }
-                if (!passed) this._wasInCheckpoint = false;
-
-                return passed;
     }
 
     handleCrash() {
@@ -332,6 +248,18 @@ export class Aircraft extends DynamicBody {
         this.angularVelocity.addScaledVector(dir.z, zDrag * adlc[2][2] * frameScale);
     }
     
+    disposeParticle(particle) {
+        particle.mesh.parent?.remove(particle.mesh);
+        particle.mesh.geometry.dispose();
+        particle.mesh.material.dispose();
+    }
+
+    clearParticles() {
+        for (const particle of this.particles ?? []) this.disposeParticle(particle);
+        if (this.particles) this.particles.length = 0;
+        this.trailCounter = 0;
+    }
+
     updateTrail(dt = 1 / 60) {
         const frameScale = dt * 60;
         // Spawn new particles
@@ -353,12 +281,17 @@ export class Aircraft extends DynamicBody {
             }
             
             if (p.life <= 0) {
-                this.scene.remove(p.mesh);
+                this.disposeParticle(p);
                 this.particles.splice(i, 1);
             }
         }
     }
     
+    // World-space point where trail particles spawn; subclasses can override
+    getTrailOrigin() {
+        return this.position.clone();
+    }
+
     spawnTrailParticle() {
         const size = 0.1 + Math.random() * 0.3;
         const geometry = new THREE.SphereGeometry(size, 8, 8);
@@ -370,9 +303,9 @@ export class Aircraft extends DynamicBody {
             opacity: 1.0
         });
         const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(this.position.x, this.position.y, this.position.z);
+        mesh.position.copy(this.getTrailOrigin());
         this.scene.add(mesh);
-        
+
         this.particles.push({
             mesh: mesh,
             life: 60,

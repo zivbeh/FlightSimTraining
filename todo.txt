@@ -14,8 +14,8 @@ add getting over it mode
 wheel ground contact dust effect
 make airplane physics interaction with ground more realistic
 add sounds: motor, ground contact, crash
+fuel bar in percentages
 when crash, instead of red particals, show explosion animation
 make runways more esthetic
 when propeller spins fast, should display a black disk with opacity
 make the bullets look realistic, and appropriate sound
-

@@ -9,6 +9,7 @@ export class Airplane extends Aircraft {
 
     constructor(world) {
         super(world);
+        this.world = world;
 
         // History for height trend (position.y over time)
         this.heightHistory = [];
@@ -39,9 +40,12 @@ export class Airplane extends Aircraft {
         this.rightElevator = null;
         this.propSpeed = 0
 
-        const startPoint = new THREE.Vector3(0, 0, 0);
-        const endPoint = new THREE.Vector3(0, 0, 0);
-        this.arrowCombined = this.createArrow(startPoint, endPoint, 0xffff00);
+        this.arrowCombined = this.createDirectionArrow();
+        this.arrowCombined.visible = false;
+        this.gustVector = new THREE.Vector3();
+        this.gustIndicator = this.createWindIndicator();
+        this.gustIndicator.visible = false;
+        this.guideTarget = null;
         this.loadModel();
         this.restart();
     }
@@ -58,16 +62,18 @@ export class Airplane extends Aircraft {
         this._lastShotAt = -Infinity;
         this.propSpeed = 0;
         this.fuel = this.fuelCapacity;
+        this.gustVector.set(0, 0, 0);
+        if (this.gustIndicator) this.gustIndicator.visible = false;
     }
 
     resetControls() {
         this.controls = { aileronLeft: 0, aileronRight: 0, elevatorLeft: 0, elevatorRight: 0, steeringWheel: 0, throttle: 0 };
     }
 
-    updateTime(dt = 1 / 60) {
-        super.updateTime(dt);
+    updateTime(dt = 1 / 60, landingContact = null) {
+        super.updateTime(dt, landingContact);
+        if (this.model) this.updateHeightHistory();
         this.updateBullets(dt);
-        // this.visualizeArrows()
     }
 
     shoot() {
@@ -94,13 +100,7 @@ export class Airplane extends Aircraft {
         const b = new Bullet(this.scene, { pos: spawnPos, dir: forward, speed: this.bulletSpeed, damage: this.bulletDamage, life: this.bulletLife });
         this.bullets.push(b);
         if (typeof this.ammo === 'number') this.ammo = Math.max(0, this.ammo - 1);
-        // small muzzle flash (a quickly-fading point light)
-        try {
-            const flash = new THREE.PointLight(0xffddaa, 1.2, 6, 2);
-            flash.position.copy(spawnPos);
-            this.scene.add(flash);
-            setTimeout(() => { try { this.scene.remove(flash); } catch(e){} }, 80);
-        } catch (e) {}
+        this.world.flashMuzzle(spawnPos);
         // play sound
         try { soundManager.playShoot(); } catch (e) {}
         this.onGameEvent?.(createGameEvent('aircraft-shot', {
@@ -114,11 +114,45 @@ export class Airplane extends Aircraft {
         return true;
     }
 
-    // Override updateAnimations to include bullet updates
+    // Guide arrow floating above and ahead of the plane, pointing at
+    // `guideTarget` (a world point set by the level, or null for no arrow).
+    // Lives in world space so it never rolls with the plane, and turns
+    // smoothly instead of snapping.
+    updateGuideArrow(dt = 1 / 60) {
+        const arrow = this.arrowCombined;
+        if (!arrow) return;
+        if (!this.guideTarget || !this.model) {
+            arrow.visible = false;
+            return;
+        }
+
+        const target = new THREE.Vector3(this.guideTarget.x, this.guideTarget.y, this.guideTarget.z);
+        if (target.distanceTo(this.position) < 0.001) {
+            arrow.visible = false;
+            return;
+        }
+
+        // Anchor: a bit ahead of the nose (heading only) and above the plane
+        const heading = this.directions?.z?.clone().setY(0) ?? new THREE.Vector3(0, 0, 1);
+        if (heading.lengthSq() < 1e-6) heading.set(0, 0, 1);
+        heading.normalize();
+        arrow.userData.time = (arrow.userData.time ?? 0) + dt;
+        const bob = Math.sin(arrow.userData.time * 3) * 0.12;
+        arrow.position.copy(this.position).addScaledVector(heading, 4).add(new THREE.Vector3(0, 2.6 + bob, 0));
+
+        const wasVisible = arrow.visible;
+        const previous = arrow.quaternion.clone();
+        arrow.lookAt(target);
+        if (wasVisible) arrow.quaternion.copy(previous.slerp(arrow.quaternion, 1 - Math.exp(-dt * 10)));
+        arrow.visible = true;
+    }
+
     updateAnimations(dt = 1 / 60) {
         super.updateAnimations(dt);
         this.updatePropeller(dt)
         this.updateControlSurfaces()
+        this.updateGuideArrow(dt);
+        this.updateGustIndicator();
     }
 
     updateControlSurfaces() {
@@ -136,10 +170,7 @@ export class Airplane extends Aircraft {
         // }
     }
 
-    // Override updateChecks to track height history
-    updateChecks() {
-        super.updateChecks();
-        
+    updateHeightHistory() {
         // Update height-history for trend analysis
         this.heightHistory.push(this.position.y);
         if (this.heightHistory.length > this.historyFrames) {
@@ -156,31 +187,126 @@ export class Airplane extends Aircraft {
         this.bullets.forEach(b => b.draw(ctx));
     }
 
-    createArrow(start, end, color = 0xff0000) {
-        // 1. Calculate the direction vector
-        const direction = new THREE.Vector3().subVectors(end, start);
-        
-        // 2. Calculate the distance (length)
-        const distance = direction.length();
-        
-        // 3. Normalize the direction (Three.js arrows require length 1 for direction)
-        direction.normalize();
+    createDirectionArrow() {
+        // Flat arrow outline pointing +Y: shaft then a wide head
+        const shape = new THREE.Shape();
+        shape.moveTo(-0.22, -1.1);
+        shape.lineTo(0.22, -1.1);
+        shape.lineTo(0.22, 0.1);
+        shape.lineTo(0.7, 0.1);
+        shape.lineTo(0, 1.1);
+        shape.lineTo(-0.7, 0.1);
+        shape.lineTo(-0.22, 0.1);
+        shape.closePath();
 
-        // 4. Create the arrow
-        // ArrowHelper(direction, origin, length, color)
-        const arrow = new THREE.ArrowHelper(direction, start, distance, color);
-        
+        const geometry = new THREE.ExtrudeGeometry(shape, {
+            depth: 0.22,
+            bevelEnabled: true,
+            bevelThickness: 0.06,
+            bevelSize: 0.06,
+            bevelSegments: 2,
+        });
+        geometry.center();
+        // Lay it flat and point it along +Z, the axis Object3D.lookAt aims
+        geometry.rotateX(Math.PI / 2);
+
+        const material = new THREE.MeshStandardMaterial({
+            color: 0xffc83d,
+            emissive: 0xff9500,
+            emissiveIntensity: 0.55,
+            metalness: 0.1,
+            roughness: 0.35,
+        });
+        const arrow = new THREE.Mesh(geometry, material);
+        arrow.castShadow = false;
+        arrow.userData.time = 0;
         this.scene.add(arrow);
         return arrow;
     }
 
-    visualizeArrows() {
-        this.arrowCombined.setDirection(this.velocity.clone().normalize());
-        this.arrowCombined.setLength(this.velocity.length() * 30);
-        this.arrowCombined.position.set(this.position.x, this.position.y, this.position.z);
+    createWindIndicator() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const sprite = new THREE.Sprite(material);
+        sprite.scale.set(3.5, 3.5, 1);
+        sprite.userData = { canvas, ctx, texture };
+        this.updateWindIndicator(sprite, 0);
+        this.scene.add(sprite);
+        return sprite;
     }
 
-    handleGroundCollision(dt = 1 / 60) {
+    updateWindIndicator(sprite, strength = 0) {
+        if (!sprite?.userData?.ctx) return;
+        const { canvas, ctx } = sprite.userData;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const pulse = 0.7 + Math.sin((performance.now() || 0) * 0.02) * 0.3;
+        ctx.beginPath();
+        ctx.arc(64, 64, 28, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 210, 90, ${0.45 + pulse * 0.4})`;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(18, 64);
+        ctx.lineTo(52, 64);
+        ctx.lineTo(46, 58);
+        ctx.moveTo(52, 64);
+        ctx.lineTo(46, 70);
+        ctx.strokeStyle = 'rgba(255, 245, 180, 0.95)';
+        ctx.lineWidth = 5;
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(255, 245, 180, 0.9)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillText('WIND', 64, 96);
+
+        sprite.material.map.needsUpdate = true;
+        sprite.material.opacity = Math.min(1, 0.3 + strength * 0.8 + pulse * 0.25);
+    }
+
+    updateGustIndicator() {
+        if (!this.gustIndicator || !this.model) {
+            if (this.gustIndicator) this.gustIndicator.visible = false;
+            return;
+        }
+        if (this.gustIndicator.parent !== this.model) {
+            this.model.add(this.gustIndicator);
+        }
+        const strength = this.gustVector.length();
+        if (strength < 0.001) {
+            this.gustIndicator.visible = false;
+            return;
+        }
+        this.gustIndicator.visible = true;
+        this.gustIndicator.position.set(0, 1.8, 5.8);
+        this.updateWindIndicator(this.gustIndicator, strength);
+        this.gustIndicator.rotation.z = Math.atan2(this.gustVector.x, this.gustVector.z) * 0.7;
+    }
+
+    createArrow(start, end, color = 0xff0000) {
+        const direction = new THREE.Vector3().subVectors(end, start);
+        const distance = direction.length();
+        direction.normalize();
+        const arrow = new THREE.ArrowHelper(direction, start, distance, color);
+        this.scene.add(arrow);
+        return arrow;
+    }
+
+
+    handleGroundCollision(dt = 1 / 60, landingContact = null) {
         const floorHeight = -this.groundOffset.y;
         // Only check for crash at the moment of impact (transitioning from air to ground)
         if (this.wasAirborne) {
@@ -216,8 +342,8 @@ export class Airplane extends Aircraft {
         const newRotationX = Math.max(this.rotation.x, this.rotation.x * this.relativeVelocity.z * 2)
         this.setRotationX(newRotationX)
         this.applyGroundFriction(dt)
-        if (this.checkRunwayLanding()) {
-            this.applyRunwayFriction(dt);
+        if (landingContact) {
+            this.applyRunwayFriction(dt, landingContact);
         }
     }
 
@@ -227,6 +353,11 @@ export class Airplane extends Aircraft {
         const adc = [0.07, 0.02, 0.09]
         const adlc = [[0, 0.5, 0], [-1.6, 0, 0], [-0.5, 0, 0]];
         this.applyDrag(dc, adc, adlc, dt)
+        if (this.gustVector.lengthSq() > 0.0001) {
+            const gust = this.gustVector.clone().normalize();
+            const gustForce = this.gustVector.length() * dt * 8;
+            this.velocity.addScaledVector(gust, gustForce);
+        }
         this.applyThrust(dt)
 
         const dir = this.directions
@@ -298,11 +429,10 @@ export class Airplane extends Aircraft {
         this.angularVelocity.addScaledVector(dir.y, vel.z * this.controls.steeringWheel * -0.0001 * frameScale);
     }
 
-    applyRunwayFriction(dt = 1 / 60) {
-        const runwayCollision = this.checkRunwayLanding();
-        if (!runwayCollision) return;
+    applyRunwayFriction(dt = 1 / 60, landingContact = null) {
+        if (!landingContact) return;
 
-        const verticalOffset = this.position.y - runwayCollision.landingHeight;
+        const verticalOffset = this.position.y - landingContact.landingHeight;
         if (verticalOffset > 0.1 || this.velocity.y > 0.05) return;
 
         const speed = Math.hypot(this.velocity.x, this.velocity.z);
@@ -349,23 +479,22 @@ export class Airplane extends Aircraft {
             this.controls.elevatorLeft -= angle;
             this.controls.elevatorRight -= angle;
         }
-        if (keys.has('d')) {
-            this.controls.aileronLeft += angle;
-            this.controls.aileronRight -= angle;
-        }
-        if (keys.has('a')) {
-            this.controls.aileronLeft -= angle;
-            this.controls.aileronRight += angle;
-        }
-        if (keys.has('e')) {
-            this.controls.elevatorLeft += angle;
-            this.controls.elevatorRight -= angle;
-            this.controls.steeringWheel += 20;
-        }
-        if (keys.has('q')) {
-            this.controls.elevatorLeft -= angle;
-            this.controls.elevatorRight += angle;
-            this.controls.steeringWheel -= 20;
+        if (this.wasAirborne) {
+            if (keys.has('d')) {
+                this.controls.aileronLeft += angle;
+                this.controls.aileronRight -= angle;
+            }
+            if (keys.has('a')) {
+                this.controls.aileronLeft -= angle;
+                this.controls.aileronRight += angle;
+            }
+        } else {
+            if (keys.has('d')) {
+                this.controls.steeringWheel += 20;
+            }
+            if (keys.has('a')) {
+                this.controls.steeringWheel -= 20;
+            }
         }
         if (keys.has(' ')) {
             this.controls.throttle = 0.8;
@@ -380,6 +509,26 @@ export class Airplane extends Aircraft {
     }
 
     // controls
+
+    // Shown in the code editor's API reference panel
+    getApiDocs() {
+        return [
+            { name: 'setThrottle', args: 'value', example: 'setThrottle(1)',
+              description: 'Engine power. Ranges from 0 (off) to 1 (full power).' },
+            { name: 'setElevatorLeft', args: 'degrees', example: 'setElevatorLeft(-10)',
+              description: 'Left elevator angle, -16 to 16. Negative pitches the nose up, positive pitches it down.' },
+            { name: 'setElevatorRight', args: 'degrees', example: 'setElevatorRight(-10)',
+              description: 'Right elevator angle, -16 to 16. Set both elevators together to pitch.' },
+            { name: 'setAileronLeft', args: 'degrees', example: 'setAileronLeft(5)',
+              description: 'Left aileron angle, -16 to 16. Use opposite values on left and right to roll.' },
+            { name: 'setAileronRight', args: 'degrees', example: 'setAileronRight(-5)',
+              description: 'Right aileron angle, -16 to 16.' },
+            { name: 'setSteeringWheel', args: 'degrees', example: 'setSteeringWheel(-3)',
+              description: 'Nose wheel angle for steering on the ground, -16 to 16.' },
+            { name: 'shoot', args: '', example: 'shoot()',
+              description: 'Fires one bullet (uses ammo).' },
+        ];
+    }
 
     getApi() {
         const maxAngle = 16;
@@ -423,13 +572,13 @@ export class Airplane extends Aircraft {
     updateInfo() {
         super.updateInfo()
         const q = this.model.quaternion
-        this.info.quaternion = {
-            x: parseFloat(q.x.toFixed(3)),
-            y: parseFloat(q.y.toFixed(3)),
-            z: parseFloat(q.z.toFixed(3)),
-            w: parseFloat(q.w.toFixed(3))
-        }
-        this.info.fuel = +(this.fuel / this.fuelCapacity).toFixed(2)
+        // this.info.quaternion = {
+        //     x: parseFloat(q.x.toFixed(3)),
+        //     y: parseFloat(q.y.toFixed(3)),
+        //     z: parseFloat(q.z.toFixed(3)),
+        //     w: parseFloat(q.w.toFixed(3))
+        // }
+        this.info.fuel = +(this.fuel / this.fuelCapacity * 100).toFixed(0)
     }
     
 

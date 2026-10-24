@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { World } from './World.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 import { Airplane } from './Airplane.js';
+import Bullet from './bullet.js';
 import { CodeEditor } from './CodeEditor.js';
 import * as Obstacle from './obstacle.js';
 import { soundManager } from './sound.js';
@@ -14,28 +15,6 @@ import { Camera } from './Camera.js';
 
 import { Levels } from './Levels.js';
 
-
-// This creates a robust absolute URL pointing to your text asset
-
-const initialCode = await loadTextFile('../scripts/4waypoints.txt');
-
-async function loadTextFile(path) {
-    const fileUrl = new URL(path, import.meta.url).href;
-    try {
-        const response = await fetch(fileUrl);
-        
-        // Check if the file actually exists and was loaded successfully
-        if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
-        }
-        
-        const textString = await response.text();
-        return textString;
-    } catch (error) {
-        console.error("Error loading text file:", error);
-        throw error; // Re-throw so the calling code knows it failed
-    }
-}
 
 
 // --- Initialize Core ---
@@ -82,6 +61,9 @@ const openLevelsButton = document.getElementById('open-levels-btn');
 const levelCompleteModal = document.getElementById('level-complete-modal');
 const levelCompleteMessage = document.getElementById('level-complete-message');
 const nextLevelButton = document.getElementById('next-level-btn');
+const levelCompleteStars = document.getElementById('level-complete-stars');
+const levelCompleteHint = document.getElementById('level-complete-hint');
+const retryLevelButton = document.getElementById('retry-level-btn');
 let levelCompleteTimer = null;
 
 function suspendFlightControls() {
@@ -93,10 +75,31 @@ function isPopupOpen() {
     return Boolean(document.querySelector('.modal[aria-hidden="false"]'));
 }
 
-function showLevelComplete({ level, nextLevel }) {
+function focusFlightCanvas() {
+    if (isPopupOpen()) return;
+    world.canvas.focus({ preventScroll: true });
+}
+
+function focusFlightCanvasAfterUIUpdate() {
+    window.requestAnimationFrame(focusFlightCanvas);
+}
+
+// Manual levels have a single star, all others two (see Levels.js)
+function starsMarkup(count, maxStars) {
+    return Array.from({ length: maxStars }, (_, i) =>
+        `<span class="star${i < count ? ' earned' : ''}">★</span>`).join('');
+}
+
+function showLevelComplete({ level, nextLevel, stars }) {
     if (levelCompleteTimer) clearTimeout(levelCompleteTimer);
     levelCompleteTimer = window.setTimeout(() => {
         levelCompleteTimer = null;
+        levelCompleteStars.innerHTML = starsMarkup(stars, level.maxStars);
+        levelCompleteHint.textContent = level.manual
+            ? 'Manual level: flying it yourself earns the star.'
+            : stars < level.maxStars
+                ? 'Second star: finish the level with a single code run and no keyboard input.'
+                : 'Perfect! You finished it with code alone.';
         levelCompleteMessage.textContent = nextLevel
             ? `Congratulations! You completed ${level.name}. You can now choose your next level.`
             : `Congratulations! You completed ${level.name} and every available level.`;
@@ -104,7 +107,7 @@ function showLevelComplete({ level, nextLevel }) {
         levelCompleteModal.setAttribute('aria-hidden', 'false');
         suspendFlightControls();
         nextLevelButton.focus();
-    }, 1500);
+    }, 1000);
 }
 
 function renderLevelsGrid() {
@@ -117,12 +120,19 @@ function renderLevelsGrid() {
         card.classList.toggle('current', level.current);
         card.disabled = !level.unlocked;
 
-        const status = !level.unlocked ? 'Locked' : level.completed ? 'Completed ✓' : level.current ? 'Current Level' : 'Unlocked';
+        // Only locked and current levels get a label; stars show completion
+        const status = !level.unlocked ? '🔒 Locked' : level.current ? '● Current' : '';
         card.innerHTML = `
-            <span class="level-card-number">Level ${level.id}</span>
+            <span class="level-card-top">
+                <span class="level-card-number">${level.id}</span>
+                ${status ? `<span class="level-card-status">${status}</span>` : ''}
+            </span>
             <span class="level-card-name"></span>
             <span class="level-card-objective"></span>
-            <span class="level-card-status">${status}</span>`;
+            <span class="level-card-bottom">
+                <span class="level-card-stars" title="${level.stars}/${level.maxStars} stars">${starsMarkup(level.stars, level.maxStars)}</span>
+                ${level.manual ? '<span class="level-card-tag" title="Fly it yourself, no code needed">Manual</span>' : ''}
+            </span>`;
         card.querySelector('.level-card-name').textContent = level.name;
         card.querySelector('.level-card-objective').textContent = level.objective;
         card.addEventListener('click', () => {
@@ -141,12 +151,16 @@ function openLevelsModal() {
 
 function closeLevelsModal() {
     levelsModal.setAttribute('aria-hidden', 'true');
+    focusFlightCanvasAfterUIUpdate();
 }
 
 const levels = new Levels({
     world,
     airplane,
     onLevelComplete: showLevelComplete,
+    onObjectiveProgress: () => {
+        try { soundManager.playObjective(); } catch (e) {}
+    },
     showBanner: (message) => {
         checkpointBanner.textContent = message;
         checkpointBanner.style.display = 'block';
@@ -166,13 +180,28 @@ nextLevelButton?.addEventListener('click', () => {
     levelCompleteModal.setAttribute('aria-hidden', 'true');
     openLevelsModal();
 });
+retryLevelButton?.addEventListener('click', () => {
+    levelCompleteModal.setAttribute('aria-hidden', 'true');
+    restartCurrentLevel();
+    // Now that a star is earned, this opens the code panel for the code attempt
+    applyCodePanelDefault();
+});
 openLevelsButton?.addEventListener('click', openLevelsModal);
 levelsBackdrop?.addEventListener('click', closeLevelsModal);
 levelsClose?.addEventListener('click', closeLevelsModal);
 window.levels = levels;
 
-function respawnAtCheckpoint(targetCheckpoint = null) {
-    levels.checkpointSystems?.respawnAtCheckpoint(targetCheckpoint);
+function restartCurrentLevel() {
+    levels.resetCurrentLevel();
+    // Once a level has a star, every retry is a chance at the code star
+    if (shouldOpenCodePanel()) setCodePanelOpen(true);
+    // The level only resets the plane; reset the rocket/quadcopter too
+    if (myAircraft !== airplane) myAircraft.restart();
+    if (window.gameState) {
+        window.gameState.flightTime = 0;
+        window.gameState.score = 0;
+    }
+    focusFlightCanvasAfterUIUpdate();
 }
 
 // Game state: money, score, flight time
@@ -187,7 +216,11 @@ window.gameState = {
 };
 
 // --- 2. Instantiate CodeEditor ---
-const codeEditor = new CodeEditor(myAircraft, initialCode);
+airplane.codeRunner.getWorldInfo = () => levels.getInfo();
+const codeEditor = new CodeEditor(myAircraft);
+// Each level remembers its own code
+const levelCodeSlot = (levelNumber) => `level-${levelNumber}`;
+codeEditor.useCodeSlot(levelCodeSlot(levels.currentLevelNumber));
 
 // --- Upgrades ---
 const upgrades = new Upgrades();
@@ -384,14 +417,24 @@ if (helpClose) helpClose.addEventListener('click', closeHelpModal);
 
 const restartBtn = document.getElementById('restartBtn');
 if (restartBtn) {
-    restartBtn.addEventListener('click', () => {
-        levels.resetCurrentLevel();
-        if (window.gameState) {
-            window.gameState.flightTime = 0;
-            window.gameState.score = 0;
-        }
-    });
+    restartBtn.addEventListener('click', restartCurrentLevel);
 }
+
+// TEMP debug: step to the previous/next level (wraps around at both ends).
+// Remove together with the .debug-level-btn buttons in index.html.
+function debugStepLevel(step) {
+    const ids = levels.levels.map((level) => level.id);
+    const index = ids.indexOf(levels.currentLevelNumber);
+    selectLevel(ids[(index + step + ids.length) % ids.length]);
+}
+document.getElementById('debug-back-btn')?.addEventListener('click', (event) => {
+    event.currentTarget.blur();
+    debugStepLevel(-1);
+});
+document.getElementById('debug-skip-btn')?.addEventListener('click', (event) => {
+    event.currentTarget.blur();
+    debugStepLevel(1);
+});
 
 const mainMenuBtn = document.getElementById('main-menu-btn');
 const mainMenu = document.getElementById('main-menu');
@@ -470,6 +513,8 @@ function selectGameMode(mode) {
         codeEditor.actor = myAircraft;
         codeEditor.runner = myAircraft.codeRunner;
         codeEditor.runner.callbacks = editorCallbacks;
+        // Keep an open API panel in sync with the new aircraft
+        if (!codeEditor.apiPanel.hidden) codeEditor.renderApiPanel();
     }
 
     gameModeOptions.forEach((option) => {
@@ -496,12 +541,15 @@ function selectLevel(levelNumber) {
         }
         levelCompleteModal.setAttribute('aria-hidden', 'true');
         levels.loadLevel(Number(levelNumber));
+        codeEditor.useCodeSlot(levelCodeSlot(levels.currentLevelNumber));
+        applyCodePanelDefault();
         closeGameMenus();
         closeLevelsModal();
         if (window.gameState) {
             window.gameState.flightTime = 0;
             window.gameState.score = 0;
         }
+        focusFlightCanvasAfterUIUpdate();
     } catch (error) {
         console.error(error);
     }
@@ -571,10 +619,48 @@ if (splitter && rightPanel) {
         if (!isResizing) return;
         isResizing = false;
         document.body.style.cursor = '';
+        syncCodePanelState();
 
         world.resize();
     });
 }
+
+// --- Code panel open/close ---
+// Levels start with the code panel closed until their first star is earned,
+// so new players focus on flying first. The splitter can still drag it open.
+const DEFAULT_RIGHT_PANEL_WIDTH = 500;
+let lastRightPanelWidth = DEFAULT_RIGHT_PANEL_WIDTH;
+
+function isCodePanelOpen() {
+    // clientWidth excludes the border, so a collapsed panel reads 0
+    return rightPanel.clientWidth > 0;
+}
+
+function syncCodePanelState() {
+    const open = isCodePanelOpen();
+    rightPanel.classList.toggle('collapsed', !open);
+}
+
+function setCodePanelOpen(open) {
+    if (open === isCodePanelOpen()) return syncCodePanelState();
+    if (!open) lastRightPanelWidth = rightPanel.clientWidth || lastRightPanelWidth;
+    rightPanel.style.width = open ? `${lastRightPanelWidth}px` : '0px';
+    syncCodePanelState();
+    world.resize();
+}
+
+// Open once the level has a star (time for the code star). Manual levels
+// never need code, so they keep it closed.
+function shouldOpenCodePanel() {
+    if (levels.currentLevel?.manual) return false;
+    return (levels.levelStars.get(levels.currentLevelNumber) ?? 0) > 0;
+}
+
+function applyCodePanelDefault() {
+    setCodePanelOpen(shouldOpenCodePanel());
+}
+
+applyCodePanelDefault();
 
 
 
@@ -582,12 +668,24 @@ if (splitter && rightPanel) {
 
 const inputController = new InputController(world.canvas);
 const camera = new Camera(world.camera, myAircraft, inputController, controls);
+
+// Any flight key breaks the "code only" run needed for the second star.
+// Camera toggle (c) and bare modifier keys don't count.
+const NON_FLIGHT_KEYS = new Set(['c', 'shift', 'control', 'alt', 'meta']);
+world.canvas.addEventListener('keydown', (event) => {
+    if (!NON_FLIGHT_KEYS.has(event.key.toLowerCase())) levels.recordKeyboardInput();
+});
+// Runs after CodeEditor's own handler, so `running` reflects the new state
+codeEditor.runBtn.addEventListener('click', () => {
+    if (codeEditor.runner.running) levels.recordCodeRun();
+});
 world.canvas.addEventListener('keydown', (event) => {
     if (event.key.toLowerCase() === 'c' && !event.repeat) {
         camera.toggleMode();
     }
 });
 selectGameMode('plane');
+focusFlightCanvasAfterUIUpdate();
 
 
 // Resume audio on first user interaction (required by some browsers)
@@ -609,52 +707,150 @@ const domHUD = {
     levelName: document.getElementById('hud-level-name'),
     objectiveText: document.getElementById('hud-objective-text'),
     objectiveProgress: document.getElementById('hud-objective-progress'),
-    nextStripInfo: document.getElementById('hud-next-strip-info'),
-    bulletsCount: document.getElementById('hud-bullets-count'),
+    levelProgressFill: document.getElementById('level-progress-fill'),
+    ammo: document.getElementById('hud-ammo'),
     ammoCount: document.getElementById('hud-ammo-count'),
-    targetsCount: document.getElementById('hud-targets-count'),
-    moneyCount: document.getElementById('hud-money-count'),
-    scoreCount: document.getElementById('hud-score-count'),
+    timeCount: document.getElementById('hud-time-count'),
     fuelFill: document.getElementById('fuel-fill'),
     fuelNum: document.getElementById('fuel-count-num'),
     fuelCapNum: document.getElementById('fuel-capacity-num')
 };
 
+// --- Interactive level tutorials ---
+// Levels that introduce a new concept get a lesson. Before the first star it
+// teaches the keyboard; after that it teaches the same move with code (second
+// star). The card reacts to what the player does.
+const tutorialCard = document.getElementById('tutorial-card');
+let tutorialKey = null;
+
+// Per-level lessons: 'keys-start', 'keys-flying' and 'code-start' (with the
+// code that "Insert code" puts in the editor)
+const LEVEL_LESSONS = {
+    1: {
+        'keys-start': {
+            title: 'Your first flight',
+            body: `Hold <kbd>Space</kbd> to give the engine power and roll forward.<br>
+                   Fly through the <span class="tut-blue">blue ring</span> ahead to pass the level.`,
+        },
+        'keys-flying': {
+            title: 'Nice, keep going!',
+            body: `Keep holding <kbd>Space</kbd> until you pass through the <span class="tut-blue">blue ring</span>.`,
+        },
+        'code-start': {
+            title: 'Second star: fly with code',
+            code: 'setThrottle(1)',
+            body: (code) => `This time, let your code fly the plane, with no keyboard at all.<br>
+                   <code>setThrottle(value)</code> sets the engine power.
+                   The value ranges from <code>0</code> (engine off) to <code>1</code> (full power):
+                   <pre>${code}</pre>
+                   Write this in the code editor (or insert it), then press <kbd>▶</kbd> Run <b>once</b>.`,
+        },
+    },
+    3: {
+        'keys-start': {
+            title: 'New: turning',
+            body: `The <span class="tut-blue">blue ring</span> is off to the <b>left</b> this time,
+                   so flying straight will miss it.<br>
+                   Hold <kbd>Space</kbd> to roll, and hold <kbd>A</kbd> to steer left
+                   (<kbd>D</kbd> steers right). Let go once you're lined up with the ring.`,
+        },
+        'keys-flying': {
+            title: 'Steer into the ring',
+            body: `Hold <kbd>A</kbd> to turn left toward the <span class="tut-blue">blue ring</span>,
+                   then let go and roll straight through it.`,
+        },
+        'code-start': {
+            title: 'Second star: turn with code',
+            // Deliberately turns the wrong way (right) so the player has to fix the sign
+            code: 'setThrottle(1)\nsetSteeringWheel(16)',
+            body: (code) => `<code>setSteeringWheel(degrees)</code> turns the nose wheel, from
+                   <code>-16</code> to <code>16</code>. <b>Negative turns left</b>, positive turns right:
+                   <pre>${code}</pre>
+                   Run it <b>once</b>. If you miss, press <b>Restart</b> and change the angle
+                   until you hit the ring.`,
+        },
+    },
+    // Keyboard flying needs no help here; only the code star is a new idea
+    5: {
+        'code-start': {
+            title: 'Second star: wait, then turn',
+            code: 'setThrottle(1)\nawait sleep(1000)\nsetSteeringWheel(-16)',
+            body: (code) => `Go straight through the first ring, then turn left all the way
+                   around to come back through the second. If your code steers right away,
+                   it misses the first ring, so it has to <b>wait</b> before turning.<br>
+                   <code>await sleep(ms)</code> pauses your code before the next line runs.
+                   <code>ms</code> is in milliseconds, so <code>1000</code> is one second:
+                   <pre>${code}</pre>
+                   Run it <b>once</b>. Too early or too late? Press <b>Restart</b> and change the
+                   sleep time until you pass both rings.`,
+        },
+    },
+};
+
+// Steps that read the same on every level
+const SHARED_TUTORIAL_STEPS = {
+    'code-running': {
+        title: 'Your code is flying!',
+        body: `Hands off the keyboard and watch it reach the <span class="tut-blue">blue ring</span>.`,
+    },
+    'code-stopped': {
+        title: 'The code stopped too early',
+        body: `It stopped before reaching the ring. Check your code, press
+               <b>Restart</b>, then Run it once.`,
+    },
+    'code-keyboard': {
+        title: 'Keyboard used',
+        body: `Pressing keys means this try only earns ★. Press <b>Restart</b> and
+               let the code do all the flying.`,
+    },
+};
+
+function getTutorialStep() {
+    if (!LEVEL_LESSONS[levels.currentLevelNumber] || activeGameMode !== 'plane' || isPopupOpen()) return null;
+    if (levels.currentLevel?.completed) return null;
+    const bestStars = levels.levelStars.get(levels.currentLevelNumber) ?? 0;
+    // Manual levels have no code star to teach
+    if (levels.currentLevel?.manual && bestStars > 0) return null;
+    const { usedKeyboard, codeRuns } = levels.attempt;
+    if (bestStars === 0) return usedKeyboard ? 'keys-flying' : 'keys-start';
+    if (bestStars === 1) {
+        if (usedKeyboard) return 'code-keyboard';
+        if (codeEditor.runner.running) return 'code-running';
+        return codeRuns > 0 ? 'code-stopped' : 'code-start';
+    }
+    return null;
+}
+
+function updateTutorial() {
+    if (!tutorialCard) return;
+    const step = getTutorialStep();
+    // A level may skip steps (e.g. no keyboard lesson); then show nothing
+    const lesson = step && (LEVEL_LESSONS[levels.currentLevelNumber][step] ?? SHARED_TUTORIAL_STEPS[step]);
+    // Include the level so switching levels re-renders the same step name
+    const key = lesson ? `${levels.currentLevelNumber}:${step}` : null;
+    if (key === tutorialKey) return;
+    tutorialKey = key;
+    tutorialCard.hidden = !lesson;
+    if (!lesson) return;
+
+    const { title, body, code } = lesson;
+    tutorialCard.innerHTML = `
+        <div class="tut-title">${title}</div>
+        <div class="tut-body">${typeof body === 'function' ? body(code) : body}</div>
+        ${code ? '<button type="button" class="tut-action">Insert code</button>' : ''}`;
+    tutorialCard.querySelector('.tut-action')?.addEventListener('click', () => {
+        codeEditor.setCode(code);
+        codeEditor.editor.focus();
+    });
+}
+
 let hudFrameCounter = 0;
 let lastShadowAltitudeRange = -1;
 
-function getNextLandingStrip() {
-    const stations = levels.checkpointSystems?.checkpoints ?? [];
-    if (stations.length === 0) return null;
-
-    const lastId = levels.checkpointState.lastCheckpoint?.config?.id;
-    const currentIndex = stations.findIndex(cp => cp.config.id === lastId);
-    if (currentIndex >= 0 && currentIndex < stations.length - 1) {
-        return stations[currentIndex + 1];
-    }
-
-    return stations.reduce((closest, cp) => {
-        const dist = cp.position.distanceTo(airplane.position);
-        const bestDist = closest ? closest.position.distanceTo(airplane.position) : Infinity;
-        return dist < bestDist ? cp : closest;
-    }, null);
-}
-
-function updateLandingStripHUD() {
-    if (!domHUD.nextStripInfo) return;
-
-    const nextStrip = getNextLandingStrip();
-    if (!nextStrip) {
-        domHUD.nextStripInfo.textContent = 'No landing strip';
-        return;
-    }
-
-    const dx = nextStrip.position.x - airplane.position.x;
-    const dz = nextStrip.position.z - airplane.position.z;
-    const dy = nextStrip.position.y - airplane.position.y;
-    const distance = Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz));
-
-    domHUD.nextStripInfo.textContent = `${distance}m`;
+function formatFlightTime(seconds) {
+    const total = Math.floor(seconds);
+    const minutes = Math.floor(total / 60);
+    return `${minutes}:${String(total % 60).padStart(2, '0')}`;
 }
 
 const attitudeCanvas = document.getElementById('attitude-canvas');
@@ -793,7 +989,7 @@ function animate(now = performance.now()) {
     } else {
         myAircraft.updateKeys(inputController.keys);
     }
-    myAircraft.updateTime(dt);
+    levels.updateAircraft(myAircraft, dt);
     if (activeGameMode === 'plane') {
         levels.updateLevelActors(dt);
         levels.updateEventSources(airplane.position, dt);
@@ -814,22 +1010,14 @@ function animate(now = performance.now()) {
     if (hudElapsed >= 0.1) {
         hudElapsed %= 0.1;
         try {
-            const bulletsActive = myAircraft.bullets ? myAircraft.bullets.filter(b => b && b.active).length : 0;
-            if (domHUD.bulletsCount) domHUD.bulletsCount.textContent = String(bulletsActive);
-
-            if (domHUD.ammoCount) {
-                domHUD.ammoCount.textContent = typeof myAircraft.ammo === 'number' ? String(myAircraft.ammo) : '0';
-            }
-
+            // Ammo only matters when there is something left to shoot
             const targets = Object.values(Obstacle.obstacles || {}).filter(o => o && o.health != null && !o._destroyed).length;
-            if (domHUD.targetsCount) domHUD.targetsCount.textContent = String(targets);
-            
-            if (domHUD.moneyCount && window.gameState) {
-                domHUD.moneyCount.textContent = String(window.gameState.money);
-            }
-            
+            const showAmmo = targets > 0 && typeof myAircraft.ammo === 'number';
+            if (domHUD.ammo) domHUD.ammo.hidden = !showAmmo;
+            if (showAmmo && domHUD.ammoCount) domHUD.ammoCount.textContent = String(myAircraft.ammo);
+
             if (window.gameState) {
-                if (domHUD.scoreCount) domHUD.scoreCount.textContent = String(window.gameState.score);
+                if (domHUD.timeCount) domHUD.timeCount.textContent = formatFlightTime(window.gameState.flightTime);
             }
 
             const activeLevel = levels.currentLevel;
@@ -842,7 +1030,11 @@ function animate(now = performance.now()) {
                     ? `${objective.progress}/${objective.required}`
                     : '0/0';
             }
-            
+            if (domHUD.levelProgressFill) {
+                const ratio = objective?.required ? objective.progress / objective.required : 0;
+                domHUD.levelProgressFill.style.width = `${Math.min(1, Math.max(0, ratio)) * 100}%`;
+            }
+
             if (typeof myAircraft.fuel === 'number' && typeof myAircraft.fuelCapacity === 'number') {
                 const pct = Math.max(0, Math.min(1, myAircraft.fuel / myAircraft.fuelCapacity));
                 if (domHUD.fuelFill) domHUD.fuelFill.style.width = (pct * 100) + '%';
@@ -850,7 +1042,7 @@ function animate(now = performance.now()) {
                 if (domHUD.fuelCapNum) domHUD.fuelCapNum.textContent = String(Math.floor(myAircraft.fuelCapacity));
             }
 
-            updateLandingStripHUD();
+            updateTutorial();
         } catch (e) {}
     }
 
@@ -860,11 +1052,11 @@ function animate(now = performance.now()) {
         crashedAircraft._respawnQueued = true;
         window.setTimeout(() => {
             if (crashedAircraft.isCrashed) {
-                if (crashedAircraft === airplane) respawnAtCheckpoint(levels.checkpointState.lastCheckpoint);
+                if (crashedAircraft === airplane) restartCurrentLevel();
                 else crashedAircraft.restart();
             }
             crashedAircraft._respawnQueued = false;
-        }, 1200);
+        }, 1000);
     }
 
     // Environment Animation
@@ -895,4 +1087,9 @@ function animate(now = performance.now()) {
     world.render();
 }
 
+try {
+    await Bullet.warmUp(world.renderer, world.scene, world.camera);
+} catch (error) {
+    console.warn('Projectile rendering warm-up failed:', error);
+}
 animate();

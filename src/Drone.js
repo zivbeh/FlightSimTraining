@@ -173,6 +173,14 @@ export class Drone extends Aircraft {
         this.controls.throttle[3] = t3;
     }
 
+    // Shown in the code editor's API reference panel
+    getApiDocs() {
+        return [
+            { name: 'setThrottle', args: 'index, value', example: 'setThrottle(0, 0.5)',
+              description: 'Power of one rotor. index is 0 to 3, value ranges from -1 to 1.' },
+        ];
+    }
+
     getApi() {
         return {
             setThrottle: (instance, index, value) => {

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { obstacles } from './obstacle.js';
 
 // Every projectile has the same appearance. Sharing these resources avoids
-// compiling and retaining a new pair of GPU geometries/materials per shot.
+// allocating and retaining new GPU geometries/materials per shot.
 const BULLET_LENGTH = 0.4;
 const BULLET_RADIUS = 0.05;
 const BULLET_BODY_GEOMETRY = new THREE.CylinderGeometry(BULLET_RADIUS, BULLET_RADIUS, BULLET_LENGTH, 8, 1);
@@ -11,6 +11,27 @@ const BULLET_TIP_GEOMETRY = new THREE.SphereGeometry(BULLET_RADIUS * 0.9, 8, 6);
 const BULLET_TIP_MATERIAL = new THREE.MeshBasicMaterial({ color: 0xffd88a });
 
 export default class Bullet {
+  // Compile the projectile materials and upload their geometry before gameplay.
+  static async warmUp(renderer, scene, camera) {
+    const preview = new Bullet(scene, {
+      pos: new THREE.Vector3(0, 0, -2).applyQuaternion(camera.quaternion).add(camera.position),
+      dir: new THREE.Vector3(0, 0, 1),
+    });
+    preview.mesh.traverse(part => { part.frustumCulled = false; });
+    const target = new THREE.WebGLRenderTarget(1, 1);
+    const previousTarget = renderer.getRenderTarget();
+    try {
+      await renderer.compileAsync(scene, camera);
+      // A real offscreen draw also performs the first geometry-buffer uploads.
+      renderer.setRenderTarget(target);
+      renderer.render(scene, camera);
+    } finally {
+      renderer.setRenderTarget(previousTarget);
+      preview.dispose();
+      target.dispose();
+    }
+  }
+
   constructor(scene, opts = {}) {
     this.basePos = opts.pos.clone();
     this.pos = this.basePos.clone();

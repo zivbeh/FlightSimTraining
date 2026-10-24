@@ -46,6 +46,10 @@ export class World {
 
         this._initSky();
         this._initLights();
+        // Keep the light count constant so firing never changes shader variants.
+        this.muzzleFlash = new THREE.PointLight(0xffddaa, 0, 6, 2);
+        this.scene.add(this.muzzleFlash);
+        this.muzzleFlashUntil = 0;
         this._initGround();
         this.runway = new Runway(this);
         this._setupResize();
@@ -188,7 +192,14 @@ export class World {
         return objects.length;
     }
 
+    flashMuzzle(position) {
+        this.muzzleFlash.position.copy(position);
+        this.muzzleFlash.intensity = 1.2;
+        this.muzzleFlashUntil = performance.now() + 80;
+    }
+
     render() {
+        if (performance.now() >= this.muzzleFlashUntil) this.muzzleFlash.intensity = 0;
         this.renderer.render(this.scene, this.camera);
     }
 }

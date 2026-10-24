@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flight Sim Training</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="style.css">
 
     
@@ -26,7 +27,10 @@
           <div class="viewport-content">
             <canvas id="bg" class="canvas"></canvas>
             <div class="top-right-buttons">
-                <button id="restartBtn" onclick="this.blur();">Restart</button>
+                <!-- TEMP debug: jump to the previous / next level. Remove before release. -->
+                <button id="debug-back-btn" class="debug-level-btn" type="button" title="Debug: go to the previous level">⏮ Back</button>
+                <button id="debug-skip-btn" class="debug-level-btn" type="button" title="Debug: skip to the next level">Skip ⏭</button>
+                <button id="restartBtn" onclick="this.blur();"><span class="btn-icon" aria-hidden="true">↻</span>Restart</button>
                 <div class="main-menu-control">
                     <button id="main-menu-btn" class="hamburger-btn" type="button" aria-label="Open game menu" aria-haspopup="menu" aria-expanded="false">
                         <span></span><span></span><span></span>
@@ -60,19 +64,27 @@
                     <span>SPEED <strong id="attitude-airspeed">0.00 m/s</strong></span>
                 </div>
             </div>
-            <!-- HUD: first row and second row indicator -->
+            <!-- Thin level progress bar across the top (objectives done / required) -->
+            <div id="level-progress" aria-hidden="true"><div id="level-progress-fill"></div></div>
+            <!-- Interactive tutorial hints (filled by main.js) -->
+            <div id="tutorial-card" role="status" aria-live="polite" hidden></div>
+            <!-- HUD: single status bar -->
             <div id="hud">
-                <div id="hud-row1">
-                    <div id="hud-money">$ <span id="hud-money-count">0</span></div>
-                    <div id="hud-score" title="One point per second while airborne">Score: <span id="hud-score-count">0</span></div>
-                    <div id="hud-bullets">In-Flight: <span id="hud-bullets-count">0</span></div>
-                    <div id="hud-ammo">Ammo: <span id="hud-ammo-count">0</span></div>
-                    <div id="hud-targets">Targets: <span id="hud-targets-count">0</span></div>
+                <div class="hud-item" id="hud-time" title="Time spent airborne">
+                    <span class="hud-label">Time</span>
+                    <span class="hud-value" id="hud-time-count">0:00</span>
                 </div>
-                <div id="hud-row2">
-                    <div id="hud-level">Level <span id="hud-level-number">1</span>: <span id="hud-level-name">First Landing</span></div>
-                    <div id="hud-objective">Objective: <span id="hud-objective-text">Land on Airport 1</span> <strong id="hud-objective-progress">0/1</strong></div>
-                    <div id="hud-next-strip">Next Strip: <span id="hud-next-strip-info">Searching...</span></div>
+                <div class="hud-item" id="hud-level">
+                    <span class="hud-label">Level <span id="hud-level-number">1</span></span>
+                    <span class="hud-value" id="hud-level-name">First Landing</span>
+                </div>
+                <div class="hud-item" id="hud-objective">
+                    <span class="hud-label">Objective</span>
+                    <span class="hud-value"><span id="hud-objective-text">Land on Airport 1</span> <strong id="hud-objective-progress">0/1</strong></span>
+                </div>
+                <div class="hud-item" id="hud-ammo" hidden>
+                    <span class="hud-label">Ammo</span>
+                    <span class="hud-value" id="hud-ammo-count">0</span>
                 </div>
             </div>
             <!-- Fuel bar at bottom -->
@@ -141,8 +153,13 @@
                 <div class="level-complete-trophy" aria-hidden="true">★</div>
                 <div class="level-complete-kicker">MISSION ACCOMPLISHED</div>
                 <h2 id="level-complete-title">Level Complete!</h2>
+                <div id="level-complete-stars" class="level-complete-stars" aria-label="Stars earned"></div>
                 <p id="level-complete-message"></p>
-                <button id="next-level-btn" type="button">Choose Next Level</button>
+                <p id="level-complete-hint" class="level-complete-hint"></p>
+                <div class="level-complete-actions">
+                    <button id="retry-level-btn" class="secondary" type="button">↻ Try Again</button>
+                    <button id="next-level-btn" type="button">Choose Next Level</button>
+                </div>
             </div>
         </div>
     </div>

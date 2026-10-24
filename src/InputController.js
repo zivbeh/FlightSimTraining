@@ -17,6 +17,7 @@ export class InputController {
         // Keyboard
         this.canvas.addEventListener('keydown', (e) => this.handleKeyDown(e), false);
         this.canvas.addEventListener('keyup', (e) => this.handleKeyUp(e), false);
+        this.canvas.addEventListener('blur', () => this.resetInputState(), false);
 
         // Mouse Position
         this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e), false);
@@ -41,6 +42,14 @@ export class InputController {
 
         // Optional: Context Menu (prevents right-click menu from popping up in-game)
         this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+
+    resetInputState() {
+        this.keys.clear();
+        this.mouse.left = false;
+        this.mouse.right = false;
+        this.mouse.middle = false;
+        this.mouse.wheelDelta = 0;
     }
 
     handleMouseMove(event) {

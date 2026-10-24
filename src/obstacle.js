@@ -126,6 +126,37 @@ class Obstacle {
     this._refreshBoundsSize();
   }
 
+    collisionCheck(aircraft) {
+        if (this.type !== 'rectdonut' || !this.mesh?.parent || this._destroyed) return false;
+
+        const obsPos = this.pos;
+        const { w, h, thickness } = this.size;
+
+        const halfW = w / 2;
+        const halfH = h / 2;
+        const halfT = thickness / 2;
+
+        const innerHalfW = halfW - thickness;
+        const innerHalfH = halfH - thickness;
+
+        const planeRadius = aircraft.boundingRadius || 2.5;
+
+        // Check if within full bounding box (considering plane size)
+        const fullInX = Math.abs(aircraft.position.x - obsPos.x) <= (halfW + planeRadius);
+        const fullInY = Math.abs(aircraft.position.y - obsPos.y) <= (halfH + planeRadius);
+        const fullInZ = Math.abs(aircraft.position.z - obsPos.z) <= (halfT + planeRadius);
+
+        // Check if within inner area (no collision) - use full inner bounds
+        const innerInX = Math.abs(aircraft.position.x - obsPos.x) <= innerHalfW;
+        const innerInY = Math.abs(aircraft.position.y - obsPos.y) <= innerHalfH;
+
+        const inFull = fullInX && fullInY && fullInZ;
+        const inInner = innerInX && innerInY; // Ignore z for inner area check
+
+        // Collision if in full but not in inner (i.e., hitting the frame)
+        return inFull && !inInner;
+    }
+
   _refreshBoundsSize() {
     if (!this.mesh) return;
     try {
@@ -365,7 +396,17 @@ function updateObstacles(now = performance.now(), deltaTime = 1 / 60){
   }
 }
 
+export function clearExplosionParticles(scene) {
+  for (const mesh of scene._explosions ?? []) {
+    mesh.parent?.remove(mesh);
+    mesh.geometry?.dispose();
+    mesh.material?.dispose();
+  }
+  if (scene._explosions) scene._explosions.length = 0;
+}
+
 function disposeAll(scene){
+  clearExplosionParticles(scene);
   obstacles.forEach(o => o.dispose(scene));
 }
 

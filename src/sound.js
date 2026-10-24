@@ -53,6 +53,24 @@ export class SoundManager {
         src.start();
     }
 
+    // Short rising two-note chime for reaching an objective point
+    playObjective() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        [[659.25, 0], [987.77, 0.09]].forEach(([freq, delay]) => {
+            const o = this.ctx.createOscillator();
+            const g = this.ctx.createGain();
+            o.type = 'sine';
+            o.frequency.setValueAtTime(freq, now + delay);
+            g.gain.setValueAtTime(0.0001, now + delay);
+            g.gain.exponentialRampToValueAtTime(0.12, now + delay + 0.015);
+            g.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.35);
+            o.connect(g); g.connect(this.ctx.destination);
+            o.start(now + delay);
+            o.stop(now + delay + 0.35);
+        });
+    }
+
     playEmpty() {
         if (!this.ctx) return;
         const o = this.ctx.createOscillator();
