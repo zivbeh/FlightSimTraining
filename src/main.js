@@ -174,7 +174,7 @@ const levels = new Levels({
         }, 2400);
     },
 });
-levels.loadLevel(1);
+levels.loadLevel(levels.getStartLevelNumber());
 
 nextLevelButton?.addEventListener('click', () => {
     levelCompleteModal.setAttribute('aria-hidden', 'true');

@@ -4,6 +4,8 @@ import { Waypoint } from './Waypoint.js';
 import { Airplane } from './Airplane.js';
 import * as Obstacle from './obstacle.js';
 
+const PROGRESS_STORAGE_KEY = 'flight_sim_progress';
+
 // Points the aircraft's guide arrow at a world position ({x, y, z}), or
 // hides it when the point is null
 function setGuideTarget(aircraft, point) {
@@ -738,6 +740,8 @@ export class Levels {
         // Best stars per level: 1 = completed, 2 = completed by a single
         // code run with no keyboard input
         this.levelStars = new Map();
+        this.lastLevelNumber = null;
+        this.loadProgress();
         this.resetAttempt();
         this.context.airplane.onGameEvent = (event) => this.emitEvent(event);
     }
@@ -771,6 +775,7 @@ export class Levels {
         this.resetAttempt();
         this.currentLevel = level;
         this.currentLevelNumber = levelNumber;
+        this.saveProgress(); // remember the last level played
         // The guide arrow belongs to the fuel-climb level only; its setup()
         // below sets a new target, every other level leaves it cleared
         if (this.context.airplane) setGuideTarget(this.context.airplane, null);
@@ -829,14 +834,7 @@ export class Levels {
             const level = this.currentLevel;
             const wasCompleted = level.completed;
             level.updatePendingLanding(aircraft);
-            if (level && !wasCompleted && level.completed) {
-                this.completedLevelIds.add(level.id);
-                const stars = this.getAttemptStars();
-                const bestStars = Math.max(stars, this.levelStars.get(level.id) ?? 0);
-                this.levelStars.set(level.id, bestStars);
-                const nextLevel = this.levels.find((candidate) => candidate.id === level.id + 1) ?? null;
-                this.onLevelComplete?.({ level, nextLevel, stars, bestStars });
-            }
+            if (level && !wasCompleted && level.completed) this.recordCompletion(level);
         }
         if (!wasCrashed && aircraft.isCrashed) aircraft.updateCodeRunner();
     }
@@ -868,14 +866,49 @@ export class Levels {
         if ((level?.objective?.progress ?? 0) > progressBefore) {
             this.context.onObjectiveProgress?.(level.objective);
         }
-        if (level && !wasCompleted && level.completed) {
-            this.completedLevelIds.add(level.id);
-            const stars = this.getAttemptStars();
-            const bestStars = Math.max(stars, this.levelStars.get(level.id) ?? 0);
-            this.levelStars.set(level.id, bestStars);
-            const nextLevel = this.levels.find((candidate) => candidate.id === level.id + 1) ?? null;
-            this.onLevelComplete?.({ level, nextLevel, stars, bestStars });
-        }
+        if (level && !wasCompleted && level.completed) this.recordCompletion(level);
+    }
+
+    recordCompletion(level) {
+        this.completedLevelIds.add(level.id);
+        const stars = this.getAttemptStars();
+        const bestStars = Math.max(stars, this.levelStars.get(level.id) ?? 0);
+        this.levelStars.set(level.id, bestStars);
+        this.saveProgress();
+        const nextLevel = this.levels.find((candidate) => candidate.id === level.id + 1) ?? null;
+        this.onLevelComplete?.({ level, nextLevel, stars, bestStars });
+    }
+
+    // --- Saved progress (browser storage) ---
+    // Stores best stars per level and the last level played. A level counts
+    // as completed once it has at least one star.
+    loadProgress() {
+        try {
+            const data = JSON.parse(localStorage.getItem(PROGRESS_STORAGE_KEY) ?? 'null');
+            if (!data) return;
+            for (const [id, stars] of Object.entries(data.stars ?? {})) {
+                const level = this.levels.find((candidate) => candidate.id === Number(id));
+                if (!level || !(stars > 0)) continue;
+                this.levelStars.set(level.id, Math.min(stars, level.maxStars));
+                this.completedLevelIds.add(level.id);
+            }
+            this.lastLevelNumber = data.lastLevel ?? null;
+        } catch (e) {}
+    }
+
+    saveProgress() {
+        try {
+            localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify({
+                stars: Object.fromEntries(this.levelStars),
+                lastLevel: this.currentLevelNumber,
+            }));
+        } catch (e) {}
+    }
+
+    // Level to open on startup: the last one played, if it still exists
+    getStartLevelNumber() {
+        const exists = this.levels.some((level) => level.id === this.lastLevelNumber);
+        return exists ? this.lastLevelNumber : this.levels[0].id;
     }
 
     handleEvent(event) {
